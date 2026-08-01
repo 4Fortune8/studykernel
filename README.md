@@ -30,8 +30,20 @@ tests/           including kernel_purity_test.py
 
 ## Quick start
 
+`study` is a package entry point — it does not exist until the package is
+installed. Editable installs need PEP 660 support (setuptools 64+), and the
+system setuptools on some distributions is older than that:
+
 ```bash
-pip install -e '.[ingest,dev]'
+python3 -m pip install --user --upgrade 'setuptools>=68'
+python3 -m pip install -e '.[ingest,dev]' --no-build-isolation
+```
+
+If `study` is still not found afterwards, `~/.local/bin` is not on your PATH.
+Every command below also works without installing anything, as
+`python3 -m kernel.cli <command>`.
+
+```bash
 export STUDY_PRODUCT=products/tsi-ready
 
 python scripts/fetch_datasets.py          # ~89 MB from HuggingFace
