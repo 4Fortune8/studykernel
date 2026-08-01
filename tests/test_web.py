@@ -263,7 +263,7 @@ def test_a_multiple_choice_item_is_answered_by_selection(client):
 
 
 def test_the_options_come_back_marked_in_the_answer_swap(client):
-    """"Key: C -- you answered B" is two bare letters without the options.
+    "\"Key: C -- you answered B\" is two bare letters without the options.
 
     They live above `#panel` and every answer posts with `hx-target="#panel"`,
     so the swap has to carry them out of band or they stay gone until a manual
