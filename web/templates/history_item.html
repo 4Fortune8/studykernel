@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Attempt {{ past.attempt_id }} &middot; studykernel{% endblock %}
+
+{% block content %}
+<p class="crumb"><a href="/history">History</a> &rsaquo; attempt {{ past.attempt_id }}</p>
+
+<h1><code>{{ past.tag_slug or "untagged" }}</code></h1>
+<p class="note">
+  {{ past.submitted_at[:16]|replace("T", " ") }} ·
+  <span class="{{ 'right' if past.correct else 'wrong' }}">{{ "correct" if past.correct else "wrong" }}</span> ·
+  lowest hint L{{ past.min_hint_level }}{% if past.confidence %} · confidence {{ past.confidence }}{% endif %}
+</p>
+
+<div class="stem math">{{ past.stem }}</div>
+
+<p>
+  You answered <span class="math key">{{ past.answer_given|delimit_math }}</span>
+  · key <span class="math key">{{ past.answer_key|delimit_math }}</span>
+</p>
+
+{% if past.exchange_state == "diagnosed" %}
+  <div class="diagnosis">
+    <p><strong>{{ past.error_code }}</strong></p>
+    <p class="one-fix">{{ past.one_fix }}</p>
+  </div>
+{% elif briefing %}
+  <h2>
+    {% if past.exchange_state == "waived" %}Exchange skipped{% else %}Exchange still open{% endif %}
+  </h2>
+  <p class="note">
+    The briefing was kept. Paste it into a chat client whenever you want the
+    diagnosis — nothing expired and nothing was lost.
+    <code>prompt_version {{ briefing["prompt_version"] }}</code>
+  </p>
+
+  <div class="briefing-tools">
+    <button type="button" class="ghost" onclick="
+      navigator.clipboard.writeText(document.getElementById('briefing-text').textContent)
+        .then(() => { this.textContent = 'Copied'; });
+    ">Copy briefing</button>
+  </div>
+  <pre id="briefing-text" class="briefing">{{ briefing["briefing"] }}</pre>
+
+  <h2>Paste the reply</h2>
+  <div id="exchange-result">
+    {% set record_url = "/history/" ~ past.attempt_id ~ "/record" %}
+    {% include "drill/_exchange_form.html" %}
+  </div>
+{% else %}
+  <p class="note">No briefing was stored for this attempt.</p>
+{% endif %}
+
+<script src="/static/vendor/htmx.min.js"></script>
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/katex/auto-render.min.js"></script>
+<script src="/static/render-math.js"></script>
+{% endblock %}

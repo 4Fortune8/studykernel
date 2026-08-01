@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}History &middot; studykernel{% endblock %}
+
+{% block content %}
+<h1>Questions answered</h1>
+
+{% if not attempts and not tag and not outcome and not state %}
+  <p class="note">Nothing answered yet. <a href="/">Start a drill</a>.</p>
+{% else %}
+
+{% if tallies %}
+  <h2>By category</h2>
+  <p class="note">
+    Weakest first. This describes what happened; it is not a measurement of
+    ability — <code>study report</code>'s reliability table is that, and it is
+    the one with confidence intervals. Three wrong out of three is a worse
+    <em>record</em> than nine of twenty and much weaker <em>evidence</em>.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th class="num">Answered</th>
+        <th class="num">Correct</th>
+        <th class="num">Mean hint</th>
+        <th class="num">Open</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tallies %}
+      <tr>
+        <td><a href="/history?tag={{ t.tag_slug }}"><code>{{ t.tag_slug }}</code></a></td>
+        <td class="num">{{ t.n }}</td>
+        <td class="num">{{ t.n_correct }} &nbsp;<span class="muted">{{ "%.0f"|format(t.accuracy * 100) }}%</span></td>
+        <td class="num">L{{ "%.1f"|format(t.mean_hint_level) }}</td>
+        <td class="num">{% if t.n_open %}{{ t.n_open }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<h2>Every attempt</h2>
+<p class="filters">
+  {% macro chip(label, key, value) -%}
+    {% set active = (key == "tag" and tag == value) or (key == "outcome" and outcome == value) or (key == "state" and state == value) %}
+    <a class="chip {% if active %}on{% endif %}"
+       href="/history?tag={{ '' if (key == 'tag' and active) else (value if key == 'tag' else tag) }}&outcome={{ '' if (key == 'outcome' and active) else (value if key == 'outcome' else outcome) }}&state={{ '' if (key == 'state' and active) else (value if key == 'state' else state) }}">{{ label }}</a>
+  {%- endmacro %}
+  {{ chip("correct", "outcome", "correct") }}
+  {{ chip("wrong", "outcome", "wrong") }}
+  {{ chip("exchange open", "state", "open") }}
+  {{ chip("diagnosed", "state", "diagnosed") }}
+  {{ chip("skipped", "state", "waived") }}
+  {% if tag or outcome or state %}<a class="chip clear" href="/history">clear</a>{% endif %}
+</p>
+
+{% if attempts %}
+<table>
+  <thead>
+    <tr>
+      <th>When</th><th>Category</th><th>Question</th>
+      <th class="num">Hint</th><th>Outcome</th><th>Exchange</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in attempts %}
+    <tr>
+      <td class="when">{{ a.submitted_at[:16]|replace("T", " ") }}</td>
+      <td><code>{{ a.tag_slug or "—" }}</code></td>
+      <td><a href="/history/{{ a.attempt_id }}">{{ a.stem[:70] }}{% if a.stem|length > 70 %}…{% endif %}</a></td>
+      <td class="num">L{{ a.min_hint_level }}</td>
+      <td class="{{ 'right' if a.correct else 'wrong' }}">{{ "correct" if a.correct else "wrong" }}</td>
+      <td>
+        {% if a.exchange_state == "diagnosed" %}
+          <code>{{ a.error_code }}</code>
+        {% elif a.exchange_state == "waived" %}
+          <span class="muted">skipped</span>
+        {% else %}
+          <a href="/history/{{ a.attempt_id }}">open</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p class="note">Nothing matches that filter.</p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

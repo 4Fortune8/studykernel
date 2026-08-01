@@ -107,16 +107,39 @@ def render(
 
 
 def _unresolved_note(conn: sqlite3.Connection, learner_id: str) -> str:
-    """Attempts that never cleared the explain-back gate.
+    """Attempts whose exchange never happened, and those a reader rejected.
 
-    Surfaced because an unresolved attempt is not a finished one: the item was
-    answered, but the minute that encodes it was skipped.
+    These are different things and the note used to conflate them, reporting
+    both as "never cleared the explain-back gate". That was wrong in the
+    common case: the *local* gate is what lets an attempt exist at all
+    (`session.submit_explain_back` persists nothing until it passes), so an
+    attempt with `resolved = 0` has almost always cleared it and is merely
+    waiting on a reader. Saying otherwise nags about work that was done, which
+    is the fastest way to teach someone to ignore the notes.
+
+    Waived attempts are counted in neither. Declining the exchange is an end
+    state (DESIGN.md §10), not an omission.
     """
     row = conn.execute(
-        "SELECT COUNT(*) AS n FROM attempts WHERE learner_id = ? AND resolved = 0",
+        """SELECT
+             SUM(CASE WHEN d.attempt_id IS NULL AND a.exchange_waived_at IS NULL
+                      THEN 1 ELSE 0 END) AS open_n,
+             SUM(CASE WHEN d.explain_back_ok = 0 THEN 1 ELSE 0 END) AS rejected_n
+           FROM attempts a
+      LEFT JOIN diagnoses d ON d.attempt_id = a.attempt_id
+          WHERE a.learner_id = ?""",
         (learner_id,),
     ).fetchone()
-    n = int(row["n"])
-    if not n:
-        return ""
-    return f"\n  note: {n} attempt(s) never cleared the explain-back gate."
+
+    notes = []
+    if int(row["open_n"] or 0):
+        notes.append(
+            f"\n  note: {int(row['open_n'])} attempt(s) awaiting a tutoring exchange "
+            "(the briefing is kept; `study history` lists them)."
+        )
+    if int(row["rejected_n"] or 0):
+        notes.append(
+            f"\n  note: {int(row['rejected_n'])} explain-back(s) a reader rejected "
+            "-- those attempts stay unresolved."
+        )
+    return "".join(notes)

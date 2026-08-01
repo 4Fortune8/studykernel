@@ -118,3 +118,111 @@ def test_profiles_are_listed_most_used_first(conn):
     assert listed[0].n_attempts == 3
     assert listed[0].used is True
     assert listed[1].used is False
+
+
+# --------------------------------------------------- past questions
+
+
+@pytest.fixture
+def history_db(conn):
+    """Two items on different tags, and attempts of both schema vintages.
+
+    Pre-migration rows have `attempts.tag_slug` NULL and have to fall back to
+    the item's own tag; post-migration rows carry it. Both shapes live in one
+    real database forever, so both belong in the fixture.
+    """
+    db.ensure_learner(conn, "me")
+    conn.execute(
+        """INSERT INTO products (product_id, display_name, objective_type,
+               config_json, pack_digest, loaded_at)
+           VALUES ('p', 'P', 'threshold', '{}', 'd', '2026-01-01')"""
+    )
+    for item_id, tag in (("i-alg", "algebra"), ("i-read", "reading")):
+        conn.execute(
+            """INSERT INTO items (item_id, product_id, section_slug, item_type, stem,
+                   answer_key, source, license, rating, rating_deviation, volatility,
+                   n_attempts, created_at)
+               VALUES (?, 'p', 's', 'mc', ?, 'a', 'test', 'test',
+                       1500, 350, 0.06, 0, '2026-01-01')""",
+            (item_id, f"stem for {item_id}"),
+        )
+        conn.execute(
+            """INSERT INTO item_tags (item_id, tag_slug, label_source, reviewed)
+               VALUES (?, ?, 'official', 1)""",
+            (item_id, tag),
+        )
+
+    def attempt(item_id, correct, hint, tag_slug, when):
+        conn.execute(
+            """INSERT INTO attempts (learner_id, product_id, item_id, started_at,
+                   submitted_at, correct, min_hint_level, tag_slug)
+               VALUES ('me', 'p', ?, ?, ?, ?, ?, ?)""",
+            (item_id, when, when, correct, hint, tag_slug),
+        )
+
+    # Pre-migration: tag_slug NULL on both, different items.
+    attempt("i-alg", 0, 1, None, "2026-01-01T01:00:00+00:00")
+    attempt("i-read", 1, 0, None, "2026-01-02T01:00:00+00:00")
+    # Post-migration: tag recorded at the time it was served.
+    attempt("i-read", 1, 0, "reading", "2026-01-03T01:00:00+00:00")
+    conn.commit()
+    return conn
+
+
+def test_old_rows_are_grouped_by_the_item_tag_not_lumped_together(history_db):
+    """The bug this caught: GROUP BY bound to the column, not the alias.
+
+    `attempts.tag_slug` is NULL on every pre-migration row and shares its name
+    with the COALESCE that fills it in, so SQLite grouped all of them into one
+    bucket labelled with whichever member surfaced first. The summary claimed
+    three attempts on one tag while the list beside it showed two tags.
+    """
+    tallies = {t.tag_slug: t for t in db.tally_by_category(history_db, "me", "p")}
+    assert set(tallies) == {"algebra", "reading"}
+    assert tallies["algebra"].n == 1
+    assert tallies["reading"].n == 2
+
+
+def test_the_summary_and_the_list_agree_on_every_category(history_db):
+    """They are separate queries over the same rows; drift between them is a bug."""
+    from collections import Counter
+
+    listed = Counter(a.tag_slug for a in db.list_past_attempts(history_db, "me", "p"))
+    tallied = {t.tag_slug: t.n for t in db.tally_by_category(history_db, "me", "p")}
+    assert dict(listed) == tallied
+
+
+def test_categories_are_ordered_weakest_first(history_db):
+    tallies = db.tally_by_category(history_db, "me", "p")
+    assert [t.tag_slug for t in tallies] == ["algebra", "reading"]
+    assert tallies[0].accuracy == 0.0
+    assert tallies[1].accuracy == 1.0
+
+
+def test_waiving_is_an_end_state_not_an_open_one(history_db):
+    attempt_id = history_db.execute("SELECT MIN(attempt_id) FROM attempts").fetchone()[0]
+    assert db.get_past_attempt(history_db, "me", "p", attempt_id).exchange_state == "open"
+
+    db.waive_exchange(history_db, attempt_id)
+    assert db.get_past_attempt(history_db, "me", "p", attempt_id).exchange_state == "waived"
+    assert not db.list_past_attempts(history_db, "me", "p", state="open") == [], "others remain"
+    assert attempt_id not in [
+        a.attempt_id for a in db.list_past_attempts(history_db, "me", "p", state="open")
+    ]
+
+    db.waive_exchange(history_db, attempt_id, waived=False)
+    assert db.get_past_attempt(history_db, "me", "p", attempt_id).exchange_state == "open"
+
+
+def test_history_filters_compose(history_db):
+    assert len(db.list_past_attempts(history_db, "me", "p", outcome="correct")) == 2
+    assert len(db.list_past_attempts(history_db, "me", "p", outcome="wrong")) == 1
+    assert len(db.list_past_attempts(history_db, "me", "p", tag_slug="reading")) == 1, (
+        "tag filtering matches the stored column, not the fallback"
+    )
+
+
+def test_history_is_scoped_to_one_learner(history_db):
+    db.ensure_learner(history_db, "other")
+    assert db.list_past_attempts(history_db, "other", "p") == []
+    assert db.tally_by_category(history_db, "other", "p") == []

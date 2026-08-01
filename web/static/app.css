@@ -233,3 +233,37 @@ button.ghost { border-color: var(--rule); color: var(--muted); }
   border-radius: 3px;
 }
 .key .katex { font-size: 1em; }
+
+/* -------------------------------------------------------------- history */
+
+nav a { margin-left: 0.9rem; }
+
+.muted { color: var(--muted); }
+td.when { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+td.right { color: var(--accent); }
+td.wrong, span.wrong { color: #b4472f; }
+span.right { color: var(--accent); }
+@media (prefers-color-scheme: dark) { td.wrong, span.wrong { color: #e8846a; } }
+
+.filters { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.chip {
+  font-size: 0.82rem;
+  padding: 0.12rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.chip.clear { border-style: dashed; }
+
+/* The skip control sits above the briefing, so finishing is one click when
+   the exchange is not wanted. */
+.waive { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; margin: 0.8rem 0 1.4rem; }
+
+.error-detail {
+  white-space: pre-wrap;
+  border-left: 2px solid #b4472f;
+  padding-left: 0.9rem;
+  font-size: 0.85rem;
+}

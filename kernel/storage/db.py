@@ -46,6 +46,8 @@ def migrate(conn: sqlite3.Connection) -> None:
 # rows is a migration that will.
 LATE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("learners", "display_name", "TEXT"),
+    ("attempts", "tag_slug", "TEXT"),
+    ("attempts", "exchange_waived_at", "TEXT"),
 )
 
 
@@ -487,8 +489,8 @@ def record_attempt(
         """INSERT INTO attempts (learner_id, product_id, item_id, started_at,
                submitted_at, confidence, rationale, verification_method, answer_given,
                correct, min_hint_level, time_to_first_selection_ms, time_total_ms,
-               pass_number, rating_delta, resolved)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+               pass_number, rating_delta, resolved, tag_slug)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
         (
             learner_id,
             product_id,
@@ -505,6 +507,7 @@ def record_attempt(
             capture.get("time_total_ms"),
             capture.get("pass_number", 1),
             delta,
+            tag_slug,
         ),
     )
     attempt_id = int(cur.lastrowid)
@@ -594,6 +597,212 @@ def record_exchange(
         (attempt_id, prompt_version, briefing, payload, now()),
     )
     conn.commit()
+
+
+# ------------------------------------------------------ answered questions
+
+
+@dataclass(frozen=True)
+class PastAttempt:
+    """One answered item, as the history page shows it."""
+
+    attempt_id: int
+    submitted_at: str
+    tag_slug: str | None
+    item_id: str
+    stem: str
+    answer_given: str | None
+    answer_key: str | None
+    correct: bool
+    min_hint_level: int
+    confidence: int | None
+    error_code: str | None
+    one_fix: str | None
+    waived_at: str | None
+    has_briefing: bool
+
+    @property
+    def exchange_state(self) -> str:
+        """`diagnosed`, `waived`, or `open`.
+
+        `open` is the only one that is a to-do. A waived attempt is finished:
+        DESIGN.md §10 makes the tutoring exchange optional, so declining it is
+        an end state, not an omission.
+        """
+        if self.error_code:
+            return "diagnosed"
+        if self.waived_at:
+            return "waived"
+        return "open"
+
+
+_HISTORY_SELECT = """
+    SELECT a.attempt_id, a.submitted_at, a.item_id, a.answer_given, a.correct,
+           a.min_hint_level, a.confidence, a.exchange_waived_at AS waived_at,
+           -- Older rows predate attempts.tag_slug; fall back to any tag the
+           -- item carries rather than showing them as uncategorised.
+           COALESCE(a.tag_slug,
+                    (SELECT t.tag_slug FROM item_tags t
+                      WHERE t.item_id = a.item_id
+                      ORDER BY t.tag_slug LIMIT 1)) AS tag_slug,
+           i.stem, i.answer_key,
+           d.error_code, d.one_fix,
+           EXISTS(SELECT 1 FROM exchanges e
+                   WHERE e.attempt_id = a.attempt_id) AS has_briefing
+      FROM attempts a
+      JOIN items i ON i.item_id = a.item_id
+ LEFT JOIN diagnoses d ON d.attempt_id = a.attempt_id
+     WHERE a.learner_id = ? AND a.product_id = ?
+"""
+
+
+def _as_past(row: sqlite3.Row) -> PastAttempt:
+    return PastAttempt(
+        attempt_id=row["attempt_id"],
+        submitted_at=row["submitted_at"],
+        tag_slug=row["tag_slug"],
+        item_id=row["item_id"],
+        stem=row["stem"],
+        answer_given=row["answer_given"],
+        answer_key=row["answer_key"],
+        correct=bool(row["correct"]),
+        min_hint_level=row["min_hint_level"],
+        confidence=row["confidence"],
+        error_code=row["error_code"],
+        one_fix=row["one_fix"],
+        waived_at=row["waived_at"],
+        has_briefing=bool(row["has_briefing"]),
+    )
+
+
+def list_past_attempts(
+    conn: sqlite3.Connection,
+    learner_id: str,
+    product_id: str,
+    tag_slug: str | None = None,
+    outcome: str | None = None,
+    state: str | None = None,
+    limit: int = 200,
+) -> list[PastAttempt]:
+    """Answered items, newest first, filterable by tag, outcome and state."""
+    sql = _HISTORY_SELECT
+    params: list[Any] = [learner_id, product_id]
+
+    if tag_slug:
+        sql += " AND COALESCE(a.tag_slug, '') = ?"
+        params.append(tag_slug)
+    if outcome == "correct":
+        sql += " AND a.correct = 1"
+    elif outcome == "wrong":
+        sql += " AND a.correct = 0"
+    if state == "open":
+        sql += " AND d.attempt_id IS NULL AND a.exchange_waived_at IS NULL"
+    elif state == "diagnosed":
+        sql += " AND d.attempt_id IS NOT NULL"
+    elif state == "waived":
+        sql += " AND a.exchange_waived_at IS NOT NULL"
+
+    sql += " ORDER BY a.submitted_at DESC, a.attempt_id DESC LIMIT ?"
+    params.append(limit)
+    return [_as_past(r) for r in conn.execute(sql, params)]
+
+
+def get_past_attempt(
+    conn: sqlite3.Connection, learner_id: str, product_id: str, attempt_id: int
+) -> PastAttempt | None:
+    row = conn.execute(
+        _HISTORY_SELECT + " AND a.attempt_id = ?", (learner_id, product_id, attempt_id)
+    ).fetchone()
+    return _as_past(row) if row else None
+
+
+@dataclass(frozen=True)
+class CategoryTally:
+    """How one tag is going. The row of the past-questions summary."""
+
+    tag_slug: str
+    n: int
+    n_correct: int
+    mean_hint_level: float
+    n_open: int
+
+    @property
+    def accuracy(self) -> float:
+        return self.n_correct / self.n if self.n else 0.0
+
+
+def tally_by_category(
+    conn: sqlite3.Connection, learner_id: str, product_id: str
+) -> list[CategoryTally]:
+    """Per-tag outcomes, weakest first.
+
+    Ordered by accuracy rather than volume: the point of looking is to find
+    where you are losing items, and sorting by count would bury a tag you got
+    wrong three times out of three under one you have practised forty times.
+
+    This is a description of what happened, not a measurement of ability --
+    `study report`'s reliability table is the latter, and it is the one with
+    the confidence intervals. Raw accuracy over four items means very little,
+    which is exactly why mastery lives on lower bounds (DESIGN.md §6.2).
+    """
+    # Grouped in an outer query on purpose. `GROUP BY tag_slug` in the inner
+    # one binds to the *column* `attempts.tag_slug`, not to the COALESCE that
+    # shares its name -- so every pre-migration row (column NULL, fallback
+    # populated) collapsed into a single group labelled with whichever member
+    # happened to surface. It reported three attempts under one tag while the
+    # attempt list beside it showed them under two.
+    rows = conn.execute(
+        """SELECT tag_slug,
+                  COUNT(*) AS n,
+                  SUM(correct) AS n_correct,
+                  AVG(min_hint_level) AS mean_hint,
+                  SUM(is_open) AS n_open
+             FROM (
+               SELECT COALESCE(a.tag_slug,
+                        (SELECT t.tag_slug FROM item_tags t
+                          WHERE t.item_id = a.item_id
+                          ORDER BY t.tag_slug LIMIT 1)) AS tag_slug,
+                      a.correct, a.min_hint_level,
+                      CASE WHEN d.attempt_id IS NULL
+                            AND a.exchange_waived_at IS NULL
+                           THEN 1 ELSE 0 END AS is_open
+                 FROM attempts a
+            LEFT JOIN diagnoses d ON d.attempt_id = a.attempt_id
+                WHERE a.learner_id = ? AND a.product_id = ?
+             )
+         GROUP BY tag_slug""",
+        (learner_id, product_id),
+    ).fetchall()
+
+    tallies = [
+        CategoryTally(
+            tag_slug=r["tag_slug"] or "(untagged)",
+            n=r["n"],
+            n_correct=int(r["n_correct"] or 0),
+            mean_hint_level=float(r["mean_hint"] or 0.0),
+            n_open=int(r["n_open"] or 0),
+        )
+        for r in rows
+    ]
+    return sorted(tallies, key=lambda t: (t.accuracy, -t.n))
+
+
+def waive_exchange(conn: sqlite3.Connection, attempt_id: int, waived: bool = True) -> None:
+    """Mark an attempt as not needing a tutoring exchange, or undo that."""
+    conn.execute(
+        "UPDATE attempts SET exchange_waived_at = ? WHERE attempt_id = ?",
+        (now() if waived else None, attempt_id),
+    )
+    conn.commit()
+
+
+def load_briefing(conn: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
+    """The stored briefing, so a skipped exchange can be picked up later."""
+    return conn.execute(
+        """SELECT briefing, prompt_version, payload_json
+             FROM exchanges WHERE attempt_id = ?""",
+        (attempt_id,),
+    ).fetchone()
 
 
 def snapshot_objective(

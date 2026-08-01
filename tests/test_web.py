@@ -380,6 +380,128 @@ def test_an_expired_token_is_a_page_not_a_traceback(client):
     assert "Nothing was recorded" in response.text
 
 
+# ------------------------------------- skipping the exchange, and history
+
+
+def finish_a_drill(client, answer=SECRET_KEY):
+    """Run one item all the way to the exchange panel. Returns the token."""
+    token = start_drill(client)
+    client.post(
+        f"/drill/{token}/capture",
+        data={
+            "confidence": "3",
+            "rationale": "The second option restates the stem.",
+            "verification_method": "re-read the qualifier",
+        },
+    )
+    client.post(f"/drill/{token}/answer", data={"answer": answer})
+    client.post(
+        f"/drill/{token}/explain",
+        data={"explanation": " ".join(["matched the stem to the option and checked"] * 4)},
+    )
+    return token
+
+
+def test_a_correct_answer_offers_to_skip_the_tutoring(client):
+    """The ease-of-use complaint: a clean solve should not demand a tutor.
+
+    DESIGN.md §10 makes the exchange optional -- "no API is required for the
+    system to work" -- so this is surfacing an existing property, not relaxing
+    one. The explain-back gate is upstream and has already passed.
+    """
+    token = finish_a_drill(client)
+    panel = client.get(f"/drill/{token}").text
+    assert f"/drill/{token}/waive" in panel
+    assert "skip the tutoring" in panel
+
+
+def test_skipping_keeps_the_attempt_and_the_briefing(client, tmp_path):
+    token = finish_a_drill(client)
+    response = client.post(f"/drill/{token}/waive", follow_redirects=False)
+    assert response.status_code == 303
+
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute(
+        "SELECT attempt_id, exchange_waived_at FROM attempts"
+    ).fetchone()
+    assert row["exchange_waived_at"] is not None
+    # Nothing thrown away: the briefing is still there to come back to.
+    assert db.load_briefing(conn, row["attempt_id"]) is not None
+    conn.close()
+
+
+def test_a_skipped_attempt_can_be_picked_up_later(client, tmp_path):
+    finish_a_drill(client)
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute("SELECT attempt_id, item_id FROM attempts").fetchone()
+    attempt_id, item_id = row["attempt_id"], row["item_id"]
+    conn.close()
+
+    page = client.get(f"/history/{attempt_id}").text
+    assert "Exchange still open" in page or "Exchange skipped" in page
+    assert "Copy briefing" in page
+
+    good = (
+        f'```json\n{{"item_id": "{item_id}", "error_code": "knowledge_gap", '
+        '"one_fix": "review the definition"}\n```'
+    )
+    result = client.post(f"/history/{attempt_id}/record", data={"pasted": good}).text
+    assert "knowledge_gap" in result
+    assert "review the definition" in result
+
+
+def test_recording_later_clears_the_waiver(client, tmp_path):
+    token = finish_a_drill(client)
+    client.post(f"/drill/{token}/waive", follow_redirects=False)
+
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute(
+        "SELECT attempt_id, item_id, exchange_waived_at FROM attempts"
+    ).fetchone()
+    assert row["exchange_waived_at"] is not None
+
+    good = (
+        f'```json\n{{"item_id": "{row["item_id"]}", "error_code": "knowledge_gap", '
+        '"one_fix": "review the definition"}\n```'
+    )
+    client.post(f"/history/{row['attempt_id']}/record", data={"pasted": good})
+
+    after = conn.execute(
+        "SELECT exchange_waived_at FROM attempts WHERE attempt_id = ?",
+        (row["attempt_id"],),
+    ).fetchone()
+    assert after["exchange_waived_at"] is None, "a diagnosis supersedes a skip"
+    conn.close()
+
+
+def test_history_groups_by_category_and_outcome(client):
+    finish_a_drill(client)                      # correct
+    finish_a_drill(client, answer="not-it")     # wrong
+
+    page = client.get("/history").text
+    assert "fractions" in page
+    assert "correct" in page and "wrong" in page
+
+    only_wrong = client.get("/history?outcome=wrong").text
+    assert only_wrong.count("<tbody>") >= 1
+    assert "not-it" not in only_wrong  # the table shows stems, not answers
+
+    open_only = client.get("/history?state=open").text
+    assert "Every attempt" in open_only
+
+
+def test_an_attempt_from_another_profile_is_not_visible(client, tmp_path):
+    finish_a_drill(client)
+    conn = db.connect(tmp_path / "web.db")
+    attempt_id = conn.execute("SELECT attempt_id FROM attempts").fetchone()[0]
+    db.ensure_learner(conn, "someone-else", "Someone Else")
+    conn.close()
+
+    client.cookies.set("studykernel_profile", "someone-else")
+    response = client.get(f"/history/{attempt_id}")
+    assert response.status_code == 404
+
+
 # --------------------------------------------------- starting up wrong
 
 

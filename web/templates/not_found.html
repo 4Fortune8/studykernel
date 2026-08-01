@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Not found &middot; studykernel{% endblock %}
+{% block content %}
+<h1>No such thing</h1>
+<p>Could not find {{ what }} for this profile.</p>
+<p class="note">
+  Attempts belong to a profile. If you switched profiles, this one may be on
+  the other.
+</p>
+<p><a href="/history">Back to history</a></p>
+{% endblock %}

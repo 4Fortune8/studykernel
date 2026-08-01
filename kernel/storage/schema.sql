@@ -187,7 +187,20 @@ CREATE TABLE IF NOT EXISTS attempts (
     pass_number                INTEGER NOT NULL DEFAULT 1,
 
     rating_delta REAL,                      -- feeds variance_rolling
-    resolved     INTEGER NOT NULL DEFAULT 0 -- explain-back gate cleared
+    -- A reader accepted the explain-back. The *local* gate is what lets an
+    -- attempt exist at all, so this is the reviewer's half, not the gate's.
+    resolved     INTEGER NOT NULL DEFAULT 0,
+
+    -- Which tag this was served for, and therefore which one the rating moved.
+    -- An item can carry several; only one of them was the reason it appeared.
+    tag_slug     TEXT,
+
+    -- The learner said this one does not need a tutoring exchange. DESIGN.md
+    -- §10 makes the exchange optional -- "no API is required for the system to
+    -- work" -- so declining it is a legitimate end state and not an omission
+    -- to nag about. The briefing stays in `exchanges` either way, so a waived
+    -- attempt can still be picked up later.
+    exchange_waived_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_attempts_learner

@@ -380,6 +380,51 @@ test can answer:
 3. Server log during that render: **zero 404s**, three woff2 fonts fetched,
    no `.woff` or `.ttf` requested.
 
+### Skipping the exchange, and the history page
+
+The complaint that prompted this: *I got the question right, I don't want to
+feed a prompt to an agent to finish.* Fair, and the design already agreed —
+DESIGN.md §10 says no API is required for the system to work, so the exchange
+was always the optional half. It just had no exit, so every correct answer
+ended at a wall of briefing text.
+
+**This does not touch the explain-back gate.** That is upstream, mandatory,
+and has already passed before the briefing exists — `submit_explain_back`
+persists nothing until it does. What is now skippable is the tutoring
+exchange, which is a different step that principle 10 never protected.
+
+- `POST /drill/{token}/waive` sets `attempts.exchange_waived_at`. Nothing is
+  discarded: attempt, capture, answer and briefing all stay.
+- `/history` lists every answered item with a per-category tally, filterable
+  by outcome and exchange state. `study history` is the terminal equivalent.
+- `/history/{attempt_id}` hands the stored briefing back with a paste box, so
+  a skipped exchange can be finished at any time. Recording supersedes the
+  waiver — it is no longer skipped, it is done.
+
+Two schema columns, both additive via `LATE_COLUMNS`:
+
+- **`attempts.tag_slug`.** `record_attempt` always received the tag and moved
+  that tag's rating, but never stored it, so there was nothing to group
+  history by. Rows written before this fall back to the item's own tag.
+- **`attempts.exchange_waived_at`.**
+
+`report.py`'s unresolved note was **wrong and had to be fixed**. It counted
+`resolved = 0` and called those attempts ones that "never cleared the
+explain-back gate". They had cleared it — `resolved` is only set when a
+*reader* accepts the explanation, so the note was reporting done work as
+undone, on every attempt, forever. It now separates *awaiting an exchange*
+from *a reader rejected the explain-back*, and ignores waived attempts.
+
+> **A bug worth remembering, found by running it and not by reading it.**
+> `GROUP BY tag_slug` in the category tally bound to the *column*
+> `attempts.tag_slug`, not to the `COALESCE(...) AS tag_slug` beside it. Every
+> pre-migration row has that column NULL, so all of them collapsed into one
+> group labelled with whichever member surfaced — the summary claimed three
+> attempts under one tag while the list directly beneath it showed two. The
+> grouping now happens in an outer query where the name is unambiguous, and
+> `tests/test_storage.py` asserts the two views agree. **Any query mixing
+> old and new rows of a late-migrated column deserves this suspicion.**
+
 Next: the `Report` page, the last item in phase 1.
 
 ### Priority (2026-08-01)

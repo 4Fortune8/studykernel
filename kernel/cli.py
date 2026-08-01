@@ -216,6 +216,50 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(args: argparse.Namespace) -> int:
+    """Past questions answered, by category and outcome."""
+    product, conn = _load(args)
+    product_id = product["product_id"]
+
+    tallies = db.tally_by_category(conn, args.learner, product_id)
+    if not tallies:
+        print("nothing answered yet")
+        return 0
+
+    print("BY CATEGORY  (weakest first; a record, not a measurement)")
+    print(f"  {'tag':<34}{'n':>5}{'correct':>10}{'hint':>7}{'open':>6}")
+    for t in tallies:
+        print(
+            f"  {t.tag_slug:<34}{t.n:>5}{t.n_correct:>6} {t.accuracy:>6.0%}"
+            f"{t.mean_hint_level:>6.1f}{t.n_open or 0:>6}"
+        )
+
+    attempts = db.list_past_attempts(
+        conn, args.learner, product_id,
+        tag_slug=args.tag, outcome=args.outcome, state=args.state,
+        limit=args.limit,
+    )
+    print(f"\nATTEMPTS  (newest first, {len(attempts)} shown)")
+    for a in attempts:
+        mark = "ok " if a.correct else "XX "
+        state = {"diagnosed": a.error_code or "diagnosed", "waived": "skipped", "open": "OPEN"}[
+            a.exchange_state
+        ]
+        print(
+            f"  {a.attempt_id:>5}  {a.submitted_at[:16].replace('T', ' ')}  {mark}"
+            f"L{a.min_hint_level}  {(a.tag_slug or '-'):<30}  {state}"
+        )
+        print(f"         {a.stem[:66]}")
+
+    open_n = sum(1 for a in attempts if a.exchange_state == "open")
+    if open_n:
+        print(
+            f"\n  {open_n} exchange(s) still open. The briefing is stored for each: "
+            "`study record <attempt_id>` picks any of them back up."
+        )
+    return 0
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
     """List or create learner profiles.
 
@@ -291,6 +335,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("report", help="position, routes, reliability, backlog")
 
+    p_history = sub.add_parser("history", help="past questions answered")
+    p_history.add_argument("--tag", help="one category only")
+    p_history.add_argument("--outcome", choices=["correct", "wrong"])
+    p_history.add_argument(
+        "--state", choices=["open", "diagnosed", "waived"],
+        help="exchange state; 'open' is the come-back-to-it list",
+    )
+    p_history.add_argument("--limit", type=int, default=20)
+
     p_profile = sub.add_parser("profile", help="list or create learner profiles")
     profile_sub = p_profile.add_subparsers(dest="profile_command", required=False)
     p_profile_add = profile_sub.add_parser("add", help="create a profile")
@@ -312,6 +365,7 @@ COMMANDS = {
     "drill": cmd_drill,
     "record": cmd_record,
     "report": cmd_report,
+    "history": cmd_history,
     "profile": cmd_profile,
     "set": cmd_set,
 }

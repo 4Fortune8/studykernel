@@ -5,9 +5,26 @@
   <h2>Attempt {{ briefing.attempt_id }} recorded</h2>
   <p class="note">
     The gate passed, so the attempt is in the log and the ratings have moved.
-    Everything below is the tutoring exchange, which is optional in the sense
-    that nothing breaks without it — and the whole point in every other sense.
+    <strong>You are done with this item.</strong> Everything below is the
+    optional tutoring exchange.
   </p>
+
+  {# The exchange earns its keep on items you got wrong or scraped through.
+     On a clean solve it is mostly ceremony, and forcing it is how a loop
+     stops getting used -- DESIGN.md §10 says no API is required for the
+     system to work, which makes declining a legitimate end state. #}
+  <form method="post" action="/drill/{{ token }}/waive" class="waive">
+    <button type="submit" class="ghost">
+      {% if view.verdict and view.verdict.correct %}
+        Got it right — skip the tutoring
+      {% else %}
+        Skip for now
+      {% endif %}
+    </button>
+    <span class="note inline">
+      kept in <a href="/history">history</a>, briefing and all, if you want it later
+    </span>
+  </form>
 
   <h2>Briefing</h2>
   <p class="note">
@@ -25,6 +42,7 @@
 
   <h2>Paste the reply</h2>
   <div id="exchange-result">
+    {% set record_url = "/drill/" ~ token ~ "/record" %}
     {% if view.diagnosis %}
       {% set diagnosis = view.diagnosis %}
       {% include "drill/_exchange_result.html" %}

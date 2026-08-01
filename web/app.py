@@ -350,12 +350,134 @@ async def drill_record(request: Request, token: str, pasted: str = Form("")) -> 
                 request=request,
                 name="drill/_exchange_result.html",
                 context={"error": str(exc), "token": token, "briefing": briefing,
-                         "pasted": pasted},
+                         "pasted": pasted,
+                         "record_url": f"/drill/{token}/record"},
             )
         return templates.TemplateResponse(
             request=request,
             name="drill/_exchange_result.html",
             context={"diagnosis": diagnosis, "token": token, "briefing": briefing},
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/waive")
+async def drill_waive(request: Request, token: str) -> RedirectResponse:
+    """"I don't need tutoring on this one." DESIGN.md §10.
+
+    The exchange is the optional half: "no API is required for the system to
+    work". Getting an item right and not wanting a tutor to explain it is the
+    ordinary case, and making that a dead end -- or worse, a permanent nag in
+    the report -- teaches people to stop finishing drills.
+
+    Nothing is discarded. The attempt, the capture, the answer and the
+    briefing all stay exactly where they were, and `/history` can pick the
+    exchange back up whenever it is actually wanted.
+    """
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        attempt_id = drill.view(token).attempt_id
+        if attempt_id is not None:
+            db.waive_exchange(conn, attempt_id)
+        drill.finish(token)
+        return RedirectResponse("/", status_code=303)
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------------------ history
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history(
+    request: Request,
+    tag: str = "",
+    outcome: str = "",
+    state: str = "",
+) -> HTMLResponse:
+    """Past questions answered, by category and outcome."""
+    conn = deps.connect()
+    try:
+        learner = deps.active_learner(request.cookies, conn)
+        if learner is None:
+            return RedirectResponse("/profiles", status_code=303)
+        product = deps.load_product()
+        product_id = product["product_id"]
+        return templates.TemplateResponse(
+            request=request,
+            name="history.html",
+            context={
+                "profile": db.get_profile(conn, learner),
+                "attempts": db.list_past_attempts(
+                    conn, learner, product_id,
+                    tag_slug=tag or None, outcome=outcome or None, state=state or None,
+                ),
+                "tallies": db.tally_by_category(conn, learner, product_id),
+                "tag": tag,
+                "outcome": outcome,
+                "state": state,
+            },
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/history/{attempt_id}", response_class=HTMLResponse)
+async def history_item(request: Request, attempt_id: int) -> HTMLResponse:
+    """One answered item, with the stored briefing if the exchange is still open."""
+    conn = deps.connect()
+    try:
+        learner = deps.active_learner(request.cookies, conn)
+        if learner is None:
+            return RedirectResponse("/profiles", status_code=303)
+        product = deps.load_product()
+        past = db.get_past_attempt(conn, learner, product["product_id"], attempt_id)
+        if past is None:
+            return templates.TemplateResponse(
+                request=request, name="not_found.html",
+                context={"what": f"attempt {attempt_id}"}, status_code=404,
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="history_item.html",
+            context={
+                "profile": db.get_profile(conn, learner),
+                "past": past,
+                "briefing": db.load_briefing(conn, attempt_id),
+            },
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/history/{attempt_id}/record", response_class=HTMLResponse)
+async def history_record(
+    request: Request, attempt_id: int, pasted: str = Form("")
+) -> HTMLResponse:
+    """Finish an exchange that was skipped earlier, or never started."""
+    conn = deps.connect()
+    try:
+        learner = deps.active_learner(request.cookies, conn)
+        if learner is None:
+            return RedirectResponse("/profiles", status_code=303)
+        drill = session.DrillSession(conn, deps.load_product(), learner)
+        try:
+            diagnosis = drill.record(attempt_id, pasted)
+        except record_mod.RecordError as exc:
+            return templates.TemplateResponse(
+                request=request, name="drill/_exchange_result.html",
+                context={"error": str(exc), "attempt_id": attempt_id, "pasted": pasted,
+                         "record_url": f"/history/{attempt_id}/record"},
+            )
+        # Recording supersedes a waiver: it is no longer skipped, it is done.
+        db.waive_exchange(conn, attempt_id, waived=False)
+        return templates.TemplateResponse(
+            request=request, name="drill/_exchange_result.html",
+            context={"diagnosis": diagnosis, "attempt_id": attempt_id},
         )
     finally:
         conn.close()

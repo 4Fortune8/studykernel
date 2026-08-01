@@ -104,11 +104,34 @@ explain-back gate, then the briefing and paste-back panel with inline
 validation. Phase lives on the server, so refreshing redraws where you are
 instead of replaying a step.
 
+**History** is the past-questions table: every item answered, grouped by
+category with accuracy and mean hint level, filterable by outcome and by
+whether the tutoring exchange happened.
+
 Math renders through bundled KaTeX — vendored, woff2 only, no network at
 runtime. MMLU stores some choices as bare `\frac{7}{9}` with no delimiters, so
 those are wrapped at render time; nothing stored is rewritten.
 
 Still missing: the `Report` page, the last item in WEB_UI.md phase 1.
+
+## The exchange is optional; the gate is not
+
+Two different steps get confused, so: the **explain-back gate** is mandatory
+and has no skip anywhere in either front end. The **tutoring exchange** — copy
+briefing, paste into a chat client, paste the JSON back — is optional, and
+DESIGN.md §10 always said so: *no API is required for the system to work.*
+
+So a drill you got right can end at the verdict. Skip the exchange and the
+attempt, the capture, the answer and the briefing are all kept; `History`
+lists what is still open and hands the briefing back whenever you want it.
+Recording a diagnosis later supersedes the skip.
+
+```bash
+study history                      # by category, then every attempt
+study history --state open         # the come-back-to-it list
+study history --tag algebra --outcome wrong
+study record <attempt_id>          # finish any of them, whenever
+```
 
 `study-web` runs a single uvicorn worker and there is no flag to change that.
 In-progress drills live in an in-process dict, so a second worker would fail
@@ -154,7 +177,7 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 ## Status
 
 v0 scaffold. The loop runs end to end on ~8,200 imported items in both the
-terminal and the browser, 152 tests pass, and the drill loop lives in
+terminal and the browser, 194 tests pass, and the drill loop lives in
 `kernel/session.py` with both front ends as adapters over it
 ([WEB_UI.md](WEB_UI.md)).
 
