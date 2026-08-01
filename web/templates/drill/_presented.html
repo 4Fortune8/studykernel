@@ -1,13 +1,23 @@
-{# Phase 1: blind capture. WEB_UI.md §4.1.
+{# Phase 1: blind capture, and the answer with it. WEB_UI.md §4.1.
 
    There is no answer key in this template and there cannot be one: the only
    item data in scope is `served`, whose type has no such field. The key
-   arrives with the verdict, after this is persisted. #}
+   arrives with the verdict, after this is persisted.
+
+   The answer box lives here rather than on a page of its own. Splitting them
+   cost a round trip to type one line, and the split only ever bought one
+   thing: the chance to pull another hint *after* the rationale was locked.
+   That is worth less than it looks, because `min_hint_level` counts rungs the
+   server actually served (§4.2) -- it is a measurement either way, and it is
+   the measurement the competence score is built on. What weakens is only the
+   rationale's blindness, and a learner editing their rationale to match a
+   hint they just read is not a case the split prevented either. #}
 <section class="phase">
   <h2>Before you answer</h2>
   <p class="note">
-    The key is not on this page — not hidden, not sent. Write this blind; it
-    is what the diagnosis reads to find where your reasoning diverged.
+    The key is not on this page — not hidden, not sent. Write the capture
+    blind; it is what the diagnosis reads to find where your reasoning
+    diverged. Hints are still available above, and each one is recorded.
   </p>
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -42,6 +52,37 @@
         </label>
       {% endif %}
     {% endfor %}
-    <button type="submit">Lock this in</button>
+
+    {# Last, and after the capture fields on purpose: the order on the page is
+       the order the pedagogy wants them written in. `required` is a courtesy
+       -- the real check is `session.BlankAnswer`, server-side.
+
+       A multiple-choice item gets the choices, because typing "C" to answer a
+       question that is already a list of four options is transcription, and
+       transcription produces wrong answers that mean nothing: an item marked
+       failed because a letter was mistyped is a false signal in exactly the
+       data the whole system is built to keep clean.
+
+       `served.choice_values` is what each option submits, and it comes from
+       the kernel -- some packs key by letter and some by option text, and the
+       template cannot tell which because it has no key to look at (§4.1). #}
+    <fieldset class="block answer">
+      <legend>Your answer</legend>
+      {% if served.choice_values %}
+        {% for value in served.choice_values %}
+          <label class="choice">
+            <input type="radio" name="answer" value="{{ value }}" required
+                   {% if submitted and submitted.answer == value %}checked{% endif %}>
+            <span class="letter">{{ "ABCDEFGH"[loop.index0] }}</span>
+            <span class="math">{{ served.choices[loop.index0]|delimit_math }}</span>
+          </label>
+        {% endfor %}
+      {% else %}
+        <input name="answer" autocomplete="off" required
+               value="{{ (submitted and submitted.answer) or '' }}">
+      {% endif %}
+    </fieldset>
+
+    <button type="submit">Lock this in and grade</button>
   </form>
 </section>

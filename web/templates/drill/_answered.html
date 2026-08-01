@@ -19,18 +19,37 @@
     "correct".
   </p>
 
-  <h2>Explain it back</h2>
-  <p class="note">
-    The solution path in your own words. Articulating it is what encodes it,
-    which is why there is no skip.
-  </p>
+  {# Same gate, two framings. Asking someone who just got it right to "explain
+     it back" reads as a request to justify themselves to a machine that
+     already knows the answer, and the honest reply is "I got it right". So on
+     a hit, ask the question the verdict above cannot answer: not what you did,
+     but why it holds. On a miss the path is still the useful thing to write.
+
+     The framing is all that changes. There is still no skip -- least of all
+     here, where the note above has just finished explaining that a correct
+     answer is exactly the signal that does not tell you which of L1 and L4 you
+     were at. A gate that opens whenever you are right is not a gate. #}
+  {% if view.verdict.correct %}
+    <h2>In two sentences, why is your answer right?</h2>
+    <p class="note">
+      Not whether it is right — you know that. Why it holds. That is the part
+      correctness above cannot tell you, and articulating it is what encodes
+      it. A sentence is enough; there is no length to reach.
+    </p>
+  {% else %}
+    <h2>Explain it back</h2>
+    <p class="note">
+      The solution path in your own words. Articulating it is what encodes it,
+      which is why there is no skip.
+    </p>
+  {% endif %}
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
   <form hx-post="/drill/{{ token }}/explain" hx-target="#panel" class="stack wide">
     <label class="block">
       <textarea name="explanation" rows="5" required
-        placeholder="How you got there — the path, not the answer.">{{ (submitted and submitted.explanation) or "" }}</textarea>
+        placeholder="{% if view.verdict.correct %}Why the answer holds — two sentences.{% else %}How you got there — the path, not the answer.{% endif %}">{{ (submitted and submitted.explanation) or "" }}</textarea>
     </label>
     <button type="submit">Submit explanation</button>
   </form>

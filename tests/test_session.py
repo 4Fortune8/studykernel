@@ -169,9 +169,18 @@ def test_the_key_is_absent_from_everything_served_before_the_answer(drill):
     served = drill.start()
     payload = dataclasses.asdict(served)
     choices = payload.pop("choices")
+    values = payload.pop("choice_values")
 
     assert choices.count(SECRET_KEY) == 1
     assert SECRET_KEY not in repr(payload)
+
+    # `choice_values` is popped alongside `choices` because it is parallel to
+    # it, not because it is exempt: it says what *each* option submits, one
+    # entry per option, and is either the letters or the options themselves.
+    # A short list -- one entry, or one marked out from the rest -- would be
+    # the leak this test exists to catch, so length is asserted, not waived.
+    assert len(values) == len(choices)
+    assert values == choices or values == list("ABCDEFGH"[: len(choices)])
 
 
 def test_the_key_arrives_only_with_the_verdict(drill):

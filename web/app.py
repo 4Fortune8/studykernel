@@ -214,6 +214,10 @@ async def home(request: Request, section: str | None = None) -> HTMLResponse:
 
 # -------------------------------------------------------------------- drill
 
+# Worded for the learner. `session.BlankAnswer` carries the reason this is
+# refused rather than graded as wrong.
+BLANK_ANSWER = "an answer is required — there is nothing to grade otherwise"
+
 
 def _session(request: Request, conn) -> session.DrillSession | None:
     learner = deps.active_learner(request.cookies, conn)
@@ -311,12 +315,26 @@ async def drill_hint(request: Request, token: str, level: int = Form(...)) -> HT
 
 @app.post("/drill/{token}/capture", response_class=HTMLResponse)
 async def drill_capture(request: Request, token: str) -> HTMLResponse:
+    """Capture *and* answer, in one submission. WEB_UI.md §4.1.
+
+    The order of the two checks below is the whole trick. The answer is tested
+    for emptiness *before* the capture is committed, so a slipped return key
+    re-renders a single form with everything already typed still in it.
+    Validating it afterwards would leave the drill in `CAPTURED` and strand the
+    learner on the answer-only page this merge exists to remove -- fixing a
+    typo by making the form harder to get back to.
+    """
     conn = deps.connect()
     try:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
         form = dict(await request.form())
+
+        answer = str(form.get("answer") or "")
+        if not answer.strip():
+            return _panel(request, drill, token, error=BLANK_ANSWER, submitted=form)
+
         fields = drill.view(token).served.capture_fields
         try:
             drill.submit_capture(token, session.build_capture(form, fields))
@@ -324,6 +342,8 @@ async def drill_capture(request: Request, token: str) -> HTMLResponse:
             # Rejected captures do not advance the phase, so re-rendering the
             # panel puts the learner back on the same form with the reason.
             return _panel(request, drill, token, error=str(exc), submitted=form)
+
+        drill.submit_answer(token, answer)
         return _panel(request, drill, token)
     finally:
         conn.close()
@@ -331,12 +351,22 @@ async def drill_capture(request: Request, token: str) -> HTMLResponse:
 
 @app.post("/drill/{token}/answer", response_class=HTMLResponse)
 async def drill_answer(request: Request, token: str, answer: str = Form("")) -> HTMLResponse:
+    """Answer alone, for a drill already sitting in `CAPTURED`.
+
+    The normal browser flow no longer reaches this -- `/capture` takes both
+    halves. It stays because `CAPTURED` is still a real phase that the kernel
+    and the CLI can produce, and a phase the front end cannot advance is a
+    dead end rather than a simplification.
+    """
     conn = deps.connect()
     try:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
-        drill.submit_answer(token, answer)
+        try:
+            drill.submit_answer(token, answer)
+        except session.BlankAnswer:
+            return _panel(request, drill, token, error=BLANK_ANSWER)
         return _panel(request, drill, token)
     finally:
         conn.close()

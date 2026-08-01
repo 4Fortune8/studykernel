@@ -16,7 +16,8 @@ which is the whole point of the extraction (WEB_UI.md §8 risk 2):
   The key cannot be handed over early by a template that asks for the wrong
   variable, because there is nothing to ask for (§4.1).
 - Phases advance in one order. Grading before capture raises `PhaseError`
-  rather than quietly recording an unusable attempt.
+  rather than quietly recording an unusable attempt. An empty answer raises
+  `BlankAnswer` for the same reason: it is a slip, not a response.
 - The explain-back gate has no skip path, and nothing is persisted until it
   passes. This module deliberately offers no flag to bypass it, exactly as
   `pedagogy/explain_back` offers none.
@@ -74,6 +75,23 @@ class Phase(str, Enum):
 
 class PhaseError(RuntimeError):
     """Raised when a step is taken out of order."""
+
+
+class BlankAnswer(ValueError):
+    """Raised when an answer is submitted empty.
+
+    A blank answer used to grade as wrong, which is defensible in the abstract
+    -- "I don't know" is a real answer -- but it is not what an empty box
+    means in practice. It means a slipped return key, and it costs the learner
+    an item plus a poisoned data point: an attempt marked wrong at whatever
+    hint level, and a `rationale` that no longer corresponds to anything
+    submitted. Deliberately declining to answer is not a case worth
+    representing at the cost of that one.
+
+    Enforced here rather than by a `required` attribute in a form, because
+    this module is where the invariants live (see this module's docstring):
+    a front end that forgets the attribute would otherwise still record it.
+    """
 
 
 class UnknownDrill(LookupError):
@@ -149,6 +167,12 @@ class Served:
     target_band: tuple[float, float]
     capture_fields: list[str]
     max_hint_level: int = hints.MAX_LEVEL
+    # Parallel to `choices`: what selecting each one submits. `None` when the
+    # item is not answerable by selection at all, which is every numeric item
+    # and any multiple-choice item whose key matches neither a letter nor an
+    # option. See `grading.choice_values` for why this is computed here and
+    # not in a template -- and for why it is not a key leak.
+    choice_values: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -499,6 +523,9 @@ class DrillSession:
             section_slug=drill.item["section_slug"],
             target_band=target_band,
             capture_fields=drill.capture_fields,
+            choice_values=grading.choice_values(
+                drill.choices, drill.item["answer_key"]
+            ),
         )
 
     # -- phase 1 -----------------------------------------------------------
@@ -542,6 +569,9 @@ class DrillSession:
         drill = self.store.get(token)
         self._require(drill, Phase.CAPTURED)
 
+        if not (answer or "").strip():
+            raise BlankAnswer("no answer given -- nothing to grade")
+
         reported = reported_hint_level or 0
         if not 0 <= reported <= hints.MAX_LEVEL:
             raise ValueError(f"hint level must be 0-{hints.MAX_LEVEL}, got {reported}")
@@ -569,7 +599,9 @@ class DrillSession:
         drill = self.store.get(token)
         self._require(drill, Phase.ANSWERED)
 
-        gate = explain_back.check(text)
+        # The verdict picks the floor: a justification for an answer that
+        # already worked is allowed to be short (pedagogy/explain_back).
+        gate = explain_back.check(text, bool(drill.correct))
         if not gate.passed:
             return gate
 

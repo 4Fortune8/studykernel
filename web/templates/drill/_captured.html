@@ -4,11 +4,23 @@
   <h2>Your answer</h2>
   <p class="note">Capture is locked. Hints are still available above and are still recorded.</p>
 
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
   <form hx-post="/drill/{{ token }}/answer" hx-target="#panel" class="stack wide">
-    <label class="block">
-      Answer
-      <input name="answer" autocomplete="off" autofocus>
-    </label>
+    <fieldset class="block answer">
+      <legend>Answer</legend>
+      {% if served.choice_values %}
+        {% for value in served.choice_values %}
+          <label class="choice">
+            <input type="radio" name="answer" value="{{ value }}" required>
+            <span class="letter">{{ "ABCDEFGH"[loop.index0] }}</span>
+            <span class="math">{{ served.choices[loop.index0]|delimit_math }}</span>
+          </label>
+        {% endfor %}
+      {% else %}
+        <input name="answer" autocomplete="off" autofocus required>
+      {% endif %}
+    </fieldset>
     <button type="submit">Submit and grade</button>
   </form>
 </section>

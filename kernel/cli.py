@@ -153,7 +153,11 @@ def cmd_drill(args: argparse.Namespace) -> int:
         print(f"\ncapture rejected: {exc}\nNothing recorded.")
         return 1
 
+    # Re-prompt rather than grade an empty box -- see session.BlankAnswer.
     given = input("\nYour answer\n> ").strip()
+    while not given:
+        given = input("An answer is required; there is nothing to grade otherwise\n> ").strip()
+
     level_raw = input(f"Lowest hint level you needed (0-{hints.MAX_LEVEL})\n> ").strip()
     min_hint = int(level_raw) if level_raw.isdigit() else 0
 
@@ -161,11 +165,16 @@ def cmd_drill(args: argparse.Namespace) -> int:
     print(f"\n{'CORRECT' if verdict.correct else 'WRONG'}   key: {verdict.answer_key}")
 
     # ---- the explain-back gate: mandatory, no skip flag
+    # Same gate either way; a correct answer only changes what to ask for. On a
+    # miss the useful question is what the path *was*; on a hit it is why the
+    # path holds, which is the thing correctness alone never establishes.
+    ask = (
+        "\nIn two sentences, why is your answer right? (this is the gate):\n> "
+        if verdict.correct
+        else "\nExplain the solution path in your own words (this is the gate):\n> "
+    )
     while True:
-        gate = drill.submit_explain_back(
-            served.token,
-            input("\nExplain the solution path in your own words (this is the gate):\n> "),
-        )
+        gate = drill.submit_explain_back(served.token, input(ask))
         if gate.passed:
             break
         print(f"  {gate.reason}")

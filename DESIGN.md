@@ -289,7 +289,10 @@ Unchanged from v0.1/v0.2 in substance; restated as kernel invariants:
 - **Explain-it-back gate.** Solution path in the student's own words, checked,
   stored. Mandatory; an item is not resolved without it. The single
   highest-value minute in the loop and the step every other tool omits because
-  it is friction.
+  it is friction. Mandatory after a *correct* answer too — that is the case it
+  exists for, since correctness cannot distinguish L1 from L4. What changes on
+  a hit is only the question asked ("why does it hold" rather than "what did
+  you do") and the length expected of the reply; see WEB_UI.md §4.3.
 - **Prerequisite DAG.** Seeded where an official taxonomy exists; learned from
   diagnosis `prerequisite_gaps` where it does not. Routing rule: ≥3 failures at
   L4+ stops the tag and serves its highest-confidence parents.

@@ -125,11 +125,33 @@ def start_drill(client) -> str:
     return response.headers["location"].rsplit("/", 1)[1]
 
 
+def work_item(client, token, answer=SECRET_KEY, **overrides):
+    """Capture and answer in one post, because they are one form now (§4.1).
+
+    Defaults are a valid submission so that a test overriding one field is
+    exercising that field and nothing else -- `work_item(client, token,
+    rationale="no")` reads as "a bad rationale", which is what it tests.
+    """
+    data = {
+        "confidence": "3",
+        "rationale": "The second option restates the stem.",
+        "verification_method": "re-read the qualifier",
+        "answer": answer,
+    }
+    data.update(overrides)
+    return client.post(f"/drill/{token}/capture", data=data)
+
+
 CHOICE_LIST = re.compile(r'<ol[^>]*\bclass="[^"]*\bchoices\b[^"]*"[^>]*>.*?</ol>', re.S)
+# The same four options rendered as the answer control instead. A selectable
+# item shows one or the other, never both -- see drill/page.html.
+CHOICE_RADIOS = re.compile(
+    r'<fieldset[^>]*\bclass="[^"]*\banswer\b[^"]*"[^>]*>.*?</fieldset>', re.S
+)
 
 
 def without_choices(html: str) -> str:
-    """The page minus the rendered choice list.
+    """The page minus the rendered choice list, in whichever form it took.
 
     The keyed string legitimately appears there, as one option among four --
     that is the item. Everywhere else is a leak.
@@ -140,8 +162,8 @@ def without_choices(html: str) -> str:
     a test that fails on markup changes. A safety test that cries wolf gets
     muted, which is the one outcome this test cannot afford.
     """
-    stripped = CHOICE_LIST.sub("", html)
-    assert stripped != html, "choice list not found -- the strip pattern is stale"
+    stripped = CHOICE_RADIOS.sub("", CHOICE_LIST.sub("", html))
+    assert stripped != html, "no choice rendering found -- the strip patterns are stale"
     return stripped
 
 
@@ -155,34 +177,90 @@ def test_the_key_is_not_in_the_capture_page(client):
     assert SECRET_KEY not in without_choices(body)
 
 
-def test_the_key_is_not_in_the_answer_page_either(client):
-    """Capture is locked but the answer is not in, so grading has not happened."""
+def test_a_rejected_submission_does_not_leak_the_key_either(client):
+    """The re-rendered form is a pre-verdict page and has to stay one.
+
+    This replaces a test of the old standalone answer page. Now that capture
+    and answer post together, the moment worth guarding is the *rejected*
+    submission -- the one path that redraws a pre-grading panel after the
+    learner has already typed an answer.
+    """
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "2",
-            "rationale": "Because the second option matches the stem.",
-            "verification_method": "re-read the qualifier",
-        },
-    )
-    body = client.get(f"/drill/{token}").text
-    assert SECRET_KEY not in without_choices(body)
+    panel = work_item(client, token, answer="").text
+    assert "an answer is required" in panel
+    assert SECRET_KEY not in without_choices(panel)
 
 
 def test_the_key_arrives_with_the_verdict(client):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "2",
-            "rationale": "Because the second option matches the stem.",
-            "verification_method": "re-read the qualifier",
-        },
-    )
-    panel = client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY}).text
+    panel = work_item(client, token).text
     assert SECRET_KEY in panel
     assert "Correct" in panel
+
+
+def test_an_answer_is_required(client, tmp_path):
+    """A slipped return key must not cost an item. See `session.BlankAnswer`.
+
+    Both halves matter: the form comes back with the capture still in it, and
+    nothing at all is recorded -- a blank answer used to grade as wrong and
+    persist as a real attempt at whatever hint level had been served.
+    """
+    token = start_drill(client)
+    panel = work_item(client, token, answer="   ").text
+    assert "an answer is required" in panel
+    assert "Lock this in" in panel, "the form comes back, not a dead end"
+    assert "The second option restates the stem." in panel, "capture is preserved"
+    assert "Correct" not in panel and "Wrong" not in panel
+
+    conn = db.connect(tmp_path / "web.db")
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+    conn.close()
+
+
+def test_capture_and_answer_are_one_page(client):
+    """One form, one round trip -- the answer box is not on a page of its own."""
+    body = client.get(f"/drill/{start_drill(client)}").text
+    assert "Before you answer" in body
+    assert 'name="answer"' in body
+    assert 'name="rationale"' in body
+    # One place to answer, and one form to post it in. Two of either means the
+    # split page came back, which is the bug this replaced.
+    assert len(CHOICE_RADIOS.findall(body)) == 1
+    assert len(re.findall(r"<form[^>]*hx-post", body)) == 2  # the form, plus hints
+
+
+def test_a_multiple_choice_item_is_answered_by_selection(client):
+    """Options are picked, not transcribed. `grading.choice_values` decides
+    what each one submits, because packs disagree about what the key is."""
+    body = client.get(f"/drill/{start_drill(client)}").text
+    radios = re.findall(r'<input type="radio" name="answer" value="([^"]*)"', body)
+    assert len(radios) == 4, "one per option"
+    assert SECRET_KEY in radios, "this pack keys by option text"
+
+    # And the options are shown once, not once as a list and again as radios.
+    assert not CHOICE_LIST.findall(body)
+
+
+def test_selecting_the_keyed_option_grades_correct(client):
+    """The end of the round trip: what a radio submits is what `grade` reads."""
+    token = start_drill(client)
+    body = client.get(f"/drill/{token}").text
+    radios = re.findall(r'<input type="radio" name="answer" value="([^"]*)"', body)
+    panel = work_item(client, token, answer=radios[1]).text  # SECRET_KEY is option B
+    assert "Correct" in panel
+
+
+def test_a_numeric_item_still_gets_a_text_box(client):
+    """No choices, nothing to select -- `choice_values` is None and says so."""
+    from kernel.pedagogy import grading
+
+    assert grading.choice_values(None, "42") is None
+    assert grading.choice_values([], "42") is None
+    # A key matching neither a letter nor an option cannot be offered as one.
+    assert grading.choice_values(["alpha", "beta"], "gamma") is None
+    assert grading.choice_values(["alpha", "beta"], "C") is None, "out of range"
+    assert grading.choice_values(["alpha", "beta"], "B") == ["A", "B"]
+    assert grading.choice_values(["alpha", "beta"], "beta") == ["alpha", "beta"]
 
 
 # --------------------------------------------------- §4.2 observed hints
@@ -193,29 +271,15 @@ def test_a_rung_served_over_http_floors_the_recorded_level(client):
     rung = client.post(f"/drill/{token}/hint", data={"level": "3"})
     assert "L3" in rung.text
 
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "1",
-            "rationale": "Guessing from the shape of the options.",
-            "verification_method": "none",
-        },
-    )
-    panel = client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY}).text
+    panel = work_item(
+        client, token, confidence="1", rationale="Guessing from the shape of the options."
+    ).text
     assert "L3" in panel
 
 
 def test_hints_are_refused_once_the_key_is_out(client):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "2",
-            "rationale": "The second option matches the stem exactly.",
-            "verification_method": "re-read",
-        },
-    )
-    client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY})
+    work_item(client, token)
     with pytest.raises(Exception):
         client.post(f"/drill/{token}/hint", data={"level": "1"})
 
@@ -225,28 +289,17 @@ def test_hints_are_refused_once_the_key_is_out(client):
 
 def test_a_rejected_capture_re_renders_the_form_with_the_reason(client):
     token = start_drill(client)
-    panel = client.post(
-        f"/drill/{token}/capture",
-        data={"confidence": "2", "rationale": "no", "verification_method": "x"},
-    ).text
+    panel = work_item(client, token, rationale="no").text
     assert "rationale must be a real sentence" in panel
     assert "Lock this in" in panel
 
 
 def test_the_gate_must_pass_before_anything_is_recorded(client, tmp_path):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "3",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read",
-        },
-    )
-    client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY})
+    work_item(client, token)
 
     panel = client.post(f"/drill/{token}/explain", data={"explanation": "dunno"}).text
-    assert "under 15 words" in panel
+    assert "under 5 words" in panel
 
     conn = db.connect(tmp_path / "web.db")
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
@@ -261,15 +314,7 @@ def test_the_gate_panel_offers_no_action_but_the_gate(client):
     test fail on its own explanation.
     """
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "3",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read",
-        },
-    )
-    body = client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY}).text
+    body = work_item(client, token).text
 
     posts = set(re.findall(r'hx-post="([^"]+)"', body))
     assert posts == {f"/drill/{token}/explain"}
@@ -277,20 +322,65 @@ def test_the_gate_panel_offers_no_action_but_the_gate(client):
     assert not re.findall(r"<a\s[^>]*href=", body)
 
 
+def test_the_gate_still_has_no_skip_when_the_answer_was_right(client):
+    """The framing changes on a hit; the gate does not.
+
+    Worth its own test because "I got it right" is exactly the case where a
+    skip button gets asked for, and the panel is rendered by a different
+    branch of the template than the one the test above covers.
+    """
+    token = start_drill(client)
+    body = work_item(client, token).text
+    assert "Correct" in body, "sanity: this is the correct-answer branch"
+
+    posts = set(re.findall(r'hx-post="([^"]+)"', body))
+    assert posts == {f"/drill/{token}/explain"}
+    assert not re.findall(r"<a\s[^>]*href=", body)
+
+
+def test_the_gate_asks_a_different_question_when_the_answer_was_right(client):
+    right = work_item(client, start_drill(client)).text
+    wrong = work_item(client, start_drill(client), answer="not-it").text
+
+    assert "why is your answer right" in right
+    assert "Explain it back" not in right
+
+    assert "Explain it back" in wrong
+    assert "why is your answer right" not in wrong
+
+
+def test_a_short_justification_passes_the_gate_after_a_correct_answer(client, tmp_path):
+    """Five words is a reason, not a dodge -- pedagogy/explain_back."""
+    token = start_drill(client)
+    work_item(client, token)
+    panel = client.post(
+        f"/drill/{token}/explain",
+        data={"explanation": "both sides divide by three"},
+    ).text
+    assert "Briefing" in panel
+
+    conn = db.connect(tmp_path / "web.db")
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+    conn.close()
+
+
+def test_the_short_floor_does_not_apply_after_a_wrong_answer(client):
+    """A miss still owes the path, which is longer than a justification."""
+    token = start_drill(client)
+    work_item(client, token, answer="not-it")
+    panel = client.post(
+        f"/drill/{token}/explain",
+        data={"explanation": "both sides divide by three"},
+    ).text
+    assert "under 12 words" in panel
+
+
 # --------------------------------------------------- the whole loop
 
 
 def test_the_full_loop_records_an_attempt_and_a_diagnosis(client, tmp_path):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "3",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read the qualifier",
-        },
-    )
-    client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY})
+    work_item(client, token)
     panel = client.post(
         f"/drill/{token}/explain",
         data={"explanation": " ".join(["matched the stem to the option and checked"] * 4)},
@@ -330,15 +420,7 @@ def test_the_full_loop_records_an_attempt_and_a_diagnosis(client, tmp_path):
 
 def test_a_mismatched_diagnosis_is_rejected_inline_and_names_both_ids(client):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "3",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read",
-        },
-    )
-    client.post(f"/drill/{token}/answer", data={"answer": SECRET_KEY})
+    work_item(client, token)
     client.post(
         f"/drill/{token}/explain",
         data={"explanation": " ".join(["matched the stem to the option and checked"] * 4)},
@@ -359,17 +441,10 @@ def test_a_mismatched_diagnosis_is_rejected_inline_and_names_both_ids(client):
 
 def test_refreshing_redraws_the_phase_instead_of_restarting(client):
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "2",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read",
-        },
-    )
+    work_item(client, token)
     first = client.get(f"/drill/{token}").text
     second = client.get(f"/drill/{token}").text
-    assert "Your answer" in first
+    assert "why is your answer right" in first  # the gate, not the capture form
     assert "Before you answer" not in first
     assert first == second
 
@@ -441,15 +516,7 @@ def test_the_start_button_carries_the_subject(client):
 def finish_a_drill(client, answer=SECRET_KEY):
     """Run one item all the way to the exchange panel. Returns the token."""
     token = start_drill(client)
-    client.post(
-        f"/drill/{token}/capture",
-        data={
-            "confidence": "3",
-            "rationale": "The second option restates the stem.",
-            "verification_method": "re-read the qualifier",
-        },
-    )
-    client.post(f"/drill/{token}/answer", data={"answer": answer})
+    work_item(client, token, answer=answer)
     client.post(
         f"/drill/{token}/explain",
         data={"explanation": " ".join(["matched the stem to the option and checked"] * 4)},

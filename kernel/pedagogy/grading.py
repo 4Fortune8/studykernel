@@ -71,6 +71,39 @@ def grade(given: str | None, key: str | None) -> bool:
     return False
 
 
+CHOICE_LETTERS = "ABCDEFGH"
+
+
+def choice_values(choices: list[str] | None, key: str | None) -> list[str] | None:
+    """What each choice must submit for `grade` to be able to judge it.
+
+    Packs disagree about what a multiple-choice key *is*. The MMLU-derived
+    items store a letter (`"C"`); other sources store the option's text. A
+    front end offering the options as buttons has to submit whichever form
+    this item's grader will recognise, and it cannot ask the key directly --
+    `Served` has no key field, which is the point of §4.1.
+
+    So the choice is made here, from the *shape* of the key alone, and the
+    whole list is returned. That leaks nothing: "this pack keys by letter" is
+    not a fact about which letter is right. Returning the list rather than a
+    per-choice answer is what keeps it that way -- there is no call here that
+    takes one choice and says something about it.
+
+    A key that is neither a letter nor one of the options is not gradable as a
+    selection, so the caller gets `None` and should fall back to a text box
+    rather than render options that cannot match.
+    """
+    if not choices:
+        return None
+    letters = list(CHOICE_LETTERS[: len(choices)])
+    normalized = normalize_answer(key)
+    if normalized in [letter.casefold() for letter in letters]:
+        return letters
+    if any(normalized == normalize_answer(choice) for choice in choices):
+        return list(choices)
+    return None
+
+
 def is_gradable(key: str | None) -> bool:
     """Whether an item can be graded deterministically at all.
 

@@ -20,7 +20,11 @@
 
   <div class="item">
     <div class="stem math">{{ served.stem }}</div>
-    {% if served.choices %}
+    {# Shown here except while the answer form is up and selectable, where the
+       radios below are the same four options and printing them twice makes the
+       learner check whether the two lists agree. After the verdict this comes
+       back, because "Key: C" is unreadable without it. #}
+    {% if served.choices and not (view.phase.value == "presented" and served.choice_values) %}
       <ol class="choices math" type="A">
         {# `delimit_math` only wraps expressions that carry no delimiters of
            their own -- MMLU stores `\frac{7}{9}` bare, and auto-render cannot

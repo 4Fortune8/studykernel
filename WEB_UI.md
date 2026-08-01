@@ -115,6 +115,31 @@ learner cannot tell because they will not remember whether they peeked.
 A view-source test belongs in the suite: fetch phase 1, assert the key string
 is absent from the body.
 
+**The answer is submitted with the capture, not on a page after it.** The
+split cost a round trip to type one line, and the only thing it bought was the
+chance to pull another hint *after* the rationale was locked — which is worth
+little, because `min_hint_level` counts rungs the server served (§4.2) either
+way. What the merge gives up is some of the rationale's blindness, and a
+learner who edits their rationale to match a hint they just read was not
+stopped by the split either.
+
+Two rules the merged form has to keep:
+
+- **An answer is required.** An empty box is a slipped return key, not a
+  response, and grading it as wrong costs an item *and* poisons the record: an
+  attempt marked failed at whatever hint level, with a rationale that
+  corresponds to nothing submitted. Enforced in the kernel
+  (`session.BlankAnswer`), not by a form attribute.
+- **Selectable items are selected, not transcribed.** Typing "C" against a
+  list of four options is transcription, and a mistyped letter is a false
+  failure in the data the whole system exists to keep clean. What each option
+  submits comes from `grading.choice_values`, because packs disagree about
+  what a key is — the MMLU-derived items store a letter, others store the
+  option text — and the template has no key to inspect, which is the point of
+  this section. Returning the whole parallel list, never a per-choice verdict,
+  is what keeps that safe: "this pack keys by letter" is not a fact about
+  which letter is right.
+
 ### 4.2 Hint ladder — observed, not self-reported
 
 The CLI asks "lowest hint level you needed" *after the fact*. The browser can
@@ -134,6 +159,27 @@ the friction *is* the mechanism. Therefore:
 - no skip button, no "remind me later", no keyboard escape
 - navigating away leaves the attempt `resolved = 0`, and the home page says so
 - the gate is server-side; a client that never renders it changes nothing
+
+**Least of all a skip for a correct answer**, which is the one that gets asked
+for. The panel it would sit on has just finished saying that solving at L1 and
+at L4 both read "correct" — correctness is precisely the signal that does not
+establish understanding, so a gate that opens whenever you are right is not a
+gate. What *does* change on a hit is the question, because "explain it back"
+to someone who just answered correctly reads as a demand to justify themselves
+to a machine that already knows, and the honest reply is "I got it right":
+
+| verdict | the gate asks | floor |
+|---|---|---|
+| wrong | the solution path — what you did, in order | 12 words |
+| correct | why the answer holds | 5 words |
+
+The floors differ because the questions do. A path is a reconstruction and has
+a length; a justification often does not — "both sides are divisible by three"
+is six words and is a complete reason. Holding *that* to a word count measures
+typing, and invites the one failure mode that actually costs something here:
+padding. A learner writing filler to clear a counter is not articulating
+anything, which is the entire mechanism. Neither floor judges quality; that is
+settled in the exchange, by a reader who has the item.
 
 The one thing the UI must *not* do is add DRM. DESIGN.md §10's honesty
 tradeoff stands: a determined user can self-report L1 after reading the

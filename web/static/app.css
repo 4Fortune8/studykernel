@@ -189,6 +189,43 @@ textarea { font: inherit; padding: 0.45rem 0.55rem; border: 1px solid var(--rule
 select { font: inherit; padding: 0.35rem; border: 1px solid var(--rule);
          border-radius: 4px; background: var(--bg); color: var(--fg); }
 
+/* The answer control. A fieldset because the options are one question, and
+   `legend` gives the group a label a screen reader reads once rather than
+   four times. Both the generic `label` (flex, space-between) and the generic
+   `input` (flex: 1) rules above are wrong here -- they would push the option
+   text away from its radio and stretch the radio itself -- so this section
+   overrides both rather than loosening them for every other form. */
+fieldset.answer {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem 0.8rem 0.7rem;
+  margin: 0;
+  width: 100%;
+}
+fieldset.answer legend { font-size: 0.85rem; color: var(--muted); padding: 0 0.3rem; }
+fieldset.answer > input { display: block; width: 100%; margin-top: 0.2rem; }
+
+label.choice {
+  display: flex;
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+label.choice:hover { background: var(--rule); }
+label.choice input[type="radio"] { flex: 0 0 auto; margin: 0; cursor: pointer; }
+label.choice .letter {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  min-width: 1ch;
+}
+label.choice:has(input:checked) { background: var(--rule); }
+
 button.ghost { border-color: var(--rule); color: var(--muted); }
 .note.inline { border: 0; padding: 0; font-size: 0.82rem; margin-left: 0.6rem; }
 
