@@ -24,6 +24,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from kernel.pedagogy import capture as capture_mod
 from kernel.pedagogy import errors, hints
 
 # Bumped when the return contract changes, not when wording is tuned. v0.2
@@ -154,7 +155,21 @@ def render(
     parts.append(f"Confidence: {capture.confidence}")
     parts.append(f"Rationale: {capture.rationale}")
     if capture.verification_method:
-        parts.append(f"Verification method: {capture.verification_method}")
+        # The reader gets the labels, not the slugs, and gets the didn't-check
+        # case said out loud. On an untimed exam a wrong answer that was never
+        # checked is a different lesson from a wrong answer that survived a
+        # check -- the first needs a checking habit, the second needs a better
+        # check -- and a tutor handed "none" alone will not draw that line.
+        methods = capture_mod.describe_verification(capture.verification_method)
+        if capture.verification_method.strip() == capture_mod.NO_CHECK:
+            parts.append(
+                "Verification: NONE -- the learner submitted without checking. "
+                "This exam is untimed, so checking was free. If the error was "
+                "one a check would have caught, say which check and why it was "
+                "the one to run here."
+            )
+        else:
+            parts.append(f"Verification method: {methods}")
     parts.append(f"Answer given: {capture.answer_given}  ->  " f"{'CORRECT' if capture.correct else 'WRONG'}")
     parts.append(
         f"Lowest hint level needed: L{capture.min_hint_level} "

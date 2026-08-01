@@ -524,6 +524,37 @@ def test_a_stuck_briefing_asks_for_a_lesson_not_a_correction():
     assert "Teach this item from the beginning" in text
 
 
+def test_the_briefing_names_the_verification_methods_in_prose():
+    """The reader gets labels, not the slugs the checkboxes post."""
+    text = briefing.render(
+        _briefing_item(),
+        _briefing_capture(verification_method="back_substitution,unit_check"),
+    )
+    assert "Back-substitution, Units and form" in text
+    assert "back_substitution" not in text
+
+
+def test_an_unchecked_answer_is_said_out_loud_to_the_reader():
+    """"Verification: none" is a different lesson from a check that missed.
+
+    Untimed means checking was free, so the tutor is told to name the check
+    that would have caught it rather than treat the miss as bad luck.
+    """
+    text = briefing.render(
+        _briefing_item(), _briefing_capture(verification_method="none")
+    )
+    assert "Verification: NONE" in text
+    assert "untimed" in text
+
+
+def test_a_briefing_still_renders_free_text_written_before_the_field_closed():
+    """Rows predate the closed set. They stay readable rather than blowing up."""
+    text = briefing.render(
+        _briefing_item(), _briefing_capture(verification_method="wowowowowow")
+    )
+    assert "wowowowowow" in text
+
+
 def test_a_list_of_fixes_is_rejected():
     """One fix, not five -- singular by prompt contract."""
     payload = (

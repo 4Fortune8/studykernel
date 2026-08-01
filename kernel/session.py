@@ -788,6 +788,10 @@ def build_capture(values: dict[str, Any], fields: list[str]) -> capture_mod.Capt
     Both callers receive text -- a terminal prompt and a form post -- and both
     need `confidence` as an int or `None`. Coercing it in one place stops the
     two front ends disagreeing about what `"3 "` or `"three"` means.
+
+    `verification_method` arrives as a list from a checkbox group and as a
+    comma-separated line from the terminal; `parse_verification` is what makes
+    those the same value, so the stored strings can be grouped by equality.
     """
     cap = capture_mod.Capture()
     for field_name in fields:
@@ -795,6 +799,8 @@ def build_capture(values: dict[str, Any], fields: list[str]) -> capture_mod.Capt
         if field_name == "confidence":
             text = str(raw).strip() if raw is not None else ""
             cap.confidence = int(text) if text.isdigit() else None
+        elif field_name == "verification_method":
+            cap.verification_method = capture_mod.parse_verification(raw)
         else:
             setattr(cap, field_name, str(raw).strip() if raw is not None else None)
     return cap

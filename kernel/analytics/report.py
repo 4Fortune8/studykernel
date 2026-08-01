@@ -12,6 +12,8 @@ import sqlite3
 
 from kernel.allocator import Allocation, starved_tags
 from kernel.objectives.base import ObjectiveReport
+from kernel.pedagogy import capture as capture_mod
+from kernel.pedagogy import errors
 from kernel.state.view import StateView
 
 BAR_WIDTH = 24
@@ -97,6 +99,10 @@ def render(
                 f"{alloc.target_band[0]:.0f}-{alloc.target_band[1]:.0f}"
             )
 
+    # ---- checking
+    if conn is not None:
+        lines.extend(_checking_section(conn, state.learner_id, state.product_id))
+
     for note in objective_report.notes:
         lines.append(f"\n  note: {note}")
 
@@ -104,6 +110,113 @@ def render(
         lines.append(_unresolved_note(conn, state.learner_id))
 
     return "\n".join(lines)
+
+
+def _checking_section(
+    conn: sqlite3.Connection, learner_id: str, product_id: str
+) -> list[str]:
+    """What checking bought, and what not checking cost. DESIGN.md §13.1.
+
+    The `verification_method` capture field spent its whole life as a text box
+    nothing read, which is the same as not collecting it. Closing it to a set
+    made it countable; this is the count, and it is the only reason the field
+    is worth the friction of asking.
+
+    The headline is deliberately the narrow number -- wrong, unchecked, and
+    coded as an error a check catches -- rather than the broad one. "You got
+    11 wrong without checking" includes items no check would have saved,
+    because you cannot verify your way out of not knowing the rule
+    (`errors.CHECKABLE_CODES`). Overstating a real problem gets the whole
+    section discounted, and this section only works if it is believed.
+
+    Self-gating: a product with the field off has no rows here and prints
+    nothing. No config is plumbed in to ask.
+    """
+    rows = conn.execute(
+        """SELECT a.verification_method AS method,
+                  a.correct             AS correct,
+                  d.error_code          AS error_code
+             FROM attempts a
+        LEFT JOIN diagnoses d ON d.attempt_id = a.attempt_id
+            WHERE a.learner_id = ? AND a.product_id = ?
+              AND a.verification_method IS NOT NULL""",
+        (learner_id, product_id),
+    ).fetchall()
+    if not rows:
+        return []
+
+    checked_n = checked_right = unchecked_n = unchecked_right = 0
+    unreadable = preventable = 0
+    method_counts: dict[str, int] = {}
+
+    for row in rows:
+        verdict = capture_mod.was_checked(row["method"])
+        if verdict is None:
+            unreadable += 1
+            continue
+        if verdict:
+            checked_n += 1
+            checked_right += int(bool(row["correct"]))
+            for slug in row["method"].split(","):
+                method_counts[slug] = method_counts.get(slug, 0) + 1
+        else:
+            unchecked_n += 1
+            unchecked_right += int(bool(row["correct"]))
+            if not row["correct"] and row["error_code"] in errors.CHECKABLE_CODES:
+                preventable += 1
+
+    if not checked_n and not unchecked_n:
+        # Every row predates the closed set. Reporting 0% off nothing would be
+        # a lie shaped like a statistic.
+        return [
+            "\nCHECKING",
+            f"  No countable data yet -- all {unreadable} attempt(s) were "
+            "recorded before this field became a fixed set.",
+        ]
+
+    lines = ["\nCHECKING  (untimed means checking was free -- this is what it bought)"]
+
+    def _row(label: str, n: int, right: int) -> str:
+        rate = f"{right / n:>6.0%}" if n else "     --"
+        return f"  {label:<18}{n:>4} attempt(s){rate} correct"
+
+    lines.append(_row("checked", checked_n, checked_right))
+    lines.append(_row("did not check", unchecked_n, unchecked_right))
+
+    if preventable:
+        lines.append(
+            f"  >>> {preventable} wrong after no check, and coded "
+            f"{'/'.join(sorted(errors.CHECKABLE_CODES))} -- a check was the fix."
+        )
+    elif unchecked_n:
+        lines.append(
+            "  No unchecked miss was coded as an error a check catches, so far."
+        )
+
+    if method_counts:
+        # Which habits actually exist. One method at high count and the rest
+        # at zero is a learner with a single reflex, which is a different
+        # problem from not checking at all and is invisible in the split above.
+        ranked = sorted(method_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        used = ", ".join(
+            f"{capture_mod.VERIFICATION_BY_SLUG[slug].label} {n}"
+            for slug, n in ranked
+        )
+        lines.append(f"  methods used: {used}")
+        never = [
+            m.label
+            for m in capture_mod.VERIFICATION_METHODS
+            if m.slug != capture_mod.NO_CHECK and m.slug not in method_counts
+        ]
+        if never:
+            lines.append(f"  never used:   {', '.join(never)}")
+
+    if unreadable:
+        lines.append(
+            f"  ({unreadable} older attempt(s) excluded -- free text from "
+            "before this field became a fixed set.)"
+        )
+    return lines
 
 
 def _unresolved_note(conn: sqlite3.Connection, learner_id: str) -> str:

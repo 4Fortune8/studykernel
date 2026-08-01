@@ -48,6 +48,47 @@ def _state_and_objective(product: dict, conn, learner: str):
     return state, objective
 
 
+def _prompt_verification() -> str:
+    """Ask the verification question as a menu rather than a blank line.
+
+    The field is a closed set, and a closed set typed from memory is a set
+    typed wrong. Numbers are accepted alongside slugs because "1,4" is the
+    whole point of closing it, and the loop re-asks instead of returning a
+    bad value -- a rejected capture aborts the drill, and losing a drill to a
+    misspelt slug is the friction DESIGN.md principle 10 warns about.
+
+    The explanations print with the menu. On the web they are on hover; here
+    there is nowhere to hover, and an unread option is a randomly ticked one.
+    """
+    methods = capture_mod.VERIFICATION_METHODS
+    print("\nHow did you check it? Numbers or slugs, comma-separated.")
+    for i, method in enumerate(methods, 1):
+        print(f"  {i}. {method.label} ({method.slug})")
+        print(f"     {method.detail}")
+
+    while True:
+        raw = input("> ").strip()
+        tokens = [t.strip() for t in raw.split(",") if t.strip()]
+        if not tokens:
+            print("Pick at least one -- or the last option, if you didn't check.")
+            continue
+        resolved, bad = [], []
+        for token in tokens:
+            if token.isdigit() and 1 <= int(token) <= len(methods):
+                resolved.append(methods[int(token) - 1].slug)
+            elif token in capture_mod.VERIFICATION_BY_SLUG:
+                resolved.append(token)
+            else:
+                bad.append(token)
+        if bad:
+            print(f"Not on the list: {', '.join(bad)}. Try again.")
+            continue
+        if capture_mod.NO_CHECK in resolved and len(resolved) > 1:
+            print("Either you checked it or you didn't -- not both. Try again.")
+            continue
+        return ",".join(resolved)
+
+
 # --------------------------------------------------------------- commands
 
 
@@ -143,7 +184,9 @@ def cmd_drill(args: argparse.Namespace) -> int:
     # ---- pre-answer capture, written blind
     print("\n--- before you answer (the key is not shown yet) ---")
     values = {
-        name: input(f"{capture_mod.KNOWN_FIELDS[name]}\n> ")
+        name: _prompt_verification()
+        if name == "verification_method"
+        else input(f"{capture_mod.KNOWN_FIELDS[name]}\n> ")
         for name in served.capture_fields
     }
     try:

@@ -13,6 +13,7 @@ import sqlite3
 
 import pytest
 
+from kernel.analytics import report
 from kernel.storage import db
 
 
@@ -226,3 +227,125 @@ def test_history_is_scoped_to_one_learner(history_db):
     db.ensure_learner(history_db, "other")
     assert db.list_past_attempts(history_db, "other", "p") == []
     assert db.tally_by_category(history_db, "other", "p") == []
+
+
+# ------------------------------------------------- the checking section
+
+
+@pytest.fixture
+def checking_db(conn):
+    """Attempts of both vintages: closed-set slugs and pre-closure free text.
+
+    Both shapes live in one real database forever -- the field was a text box
+    for its first 32 rows -- so both belong in the fixture.
+    """
+    db.ensure_learner(conn, "me")
+    db.ensure_learner(conn, "someone-else")
+    conn.execute(
+        """INSERT INTO products (product_id, display_name, objective_type,
+               config_json, pack_digest, loaded_at)
+           VALUES ('p', 'P', 'threshold', '{}', 'd', '2026-01-01')"""
+    )
+    conn.execute(
+        """INSERT INTO items (item_id, product_id, section_slug, item_type, stem,
+               answer_key, source, license, rating, rating_deviation, volatility,
+               n_attempts, created_at)
+           VALUES ('i', 'p', 's', 'mc', 'stem', 'a', 'test', 'test',
+                   1500, 350, 0.06, 0, '2026-01-01')"""
+    )
+
+    def attempt(method, correct, code=None, learner="me"):
+        cur = conn.execute(
+            """INSERT INTO attempts (learner_id, product_id, item_id, started_at,
+                   submitted_at, correct, verification_method, tag_slug)
+               VALUES (?, 'p', 'i', '2026-01-01', '2026-01-01', ?, ?, 'algebra')""",
+            (learner, correct, method),
+        )
+        if code:
+            conn.execute(
+                "INSERT INTO diagnoses (attempt_id, error_code, one_fix) VALUES (?, ?, 'f')",
+                (cur.lastrowid, code),
+            )
+
+    return conn, attempt
+
+
+def checking(conn, learner="me"):
+    return "\n".join(report._checking_section(conn, learner, "p"))
+
+
+def test_the_checking_split_counts_both_sides(checking_db):
+    conn, attempt = checking_db
+    attempt("back_substitution,unit_check", 1)
+    attempt("recomputed", 1)
+    attempt("none", 0, "execution_error")
+    text = checking(conn)
+    assert "checked              2 attempt(s)  100% correct" in text
+    assert "did not check        1 attempt(s)    0% correct" in text
+
+
+def test_the_headline_counts_only_errors_a_check_would_have_caught(checking_db):
+    """`knowledge_gap` is worse and no check finds it.
+
+    Counting it here would inflate a real number, and an inflated number gets
+    the whole section discounted -- which is the one thing it cannot afford.
+    """
+    conn, attempt = checking_db
+    attempt("none", 0, "execution_error")
+    attempt("none", 0, "misread")
+    attempt("none", 0, "knowledge_gap")
+    text = checking(conn)
+    assert ">>> 2 wrong after no check" in text
+
+
+def test_an_unchecked_miss_nobody_diagnosed_is_not_counted_as_preventable(checking_db):
+    """No diagnosis means no error code, and no grounds to call it careless."""
+    conn, attempt = checking_db
+    attempt("none", 0)
+    text = checking(conn)
+    assert ">>>" not in text
+    assert "No unchecked miss was coded" in text
+
+
+def test_free_text_from_before_the_closed_set_is_excluded_and_said_so(checking_db):
+    conn, attempt = checking_db
+    attempt("wowowowowow", 0)
+    attempt("Not sure what to put here", 1)
+    attempt("back_substitution", 1)
+    text = checking(conn)
+    assert "checked              1 attempt(s)" in text
+    assert "2 older attempt(s) excluded" in text
+
+
+def test_a_history_that_is_entirely_free_text_reports_no_number(checking_db):
+    """0% off nothing is a lie shaped like a statistic."""
+    conn, attempt = checking_db
+    attempt("math", 0)
+    text = checking(conn)
+    assert "No countable data yet" in text
+    assert "%" not in text
+
+
+def test_the_methods_never_used_are_named(checking_db):
+    """One reflex and no others is a different problem from not checking."""
+    conn, attempt = checking_db
+    attempt("back_substitution", 1)
+    attempt("back_substitution", 1)
+    text = checking(conn)
+    assert "methods used: Back-substitution 2" in text
+    assert "never used:" in text
+    assert "Size check" in text
+    assert "I didn't check" not in text  # not a method, and never "unused"
+
+
+def test_a_product_with_the_field_off_prints_nothing(checking_db):
+    """Self-gating: no rows, no section, no config plumbed in to ask."""
+    conn, attempt = checking_db
+    assert checking(conn) == ""
+
+
+def test_the_checking_section_is_scoped_to_one_learner(checking_db):
+    conn, attempt = checking_db
+    attempt("none", 0, "execution_error", learner="someone-else")
+    assert checking(conn, "me") == ""
+    assert ">>> 1 wrong" in checking(conn, "someone-else")

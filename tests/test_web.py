@@ -12,6 +12,7 @@ learner cannot tell, because they will not remember whether they peeked.
 from __future__ import annotations
 
 import re
+from markupsafe import escape  # what Jinja autoescaping actually emits
 
 import pytest
 
@@ -20,6 +21,7 @@ pytest.importorskip("fastapi", reason="web extra not installed")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from kernel import config  # noqa: E402
+from kernel.pedagogy import capture as capture_mod  # noqa: E402
 from kernel.pedagogy import explain_back  # noqa: E402
 from kernel.storage import db  # noqa: E402
 
@@ -154,7 +156,7 @@ def work_item(client, token, answer=SECRET_KEY, **overrides):
     data = {
         "confidence": "3",
         "rationale": RATIONALE,
-        "verification_method": "re-read the qualifier",
+        "verification_method": "reread_qualifier",
         "answer": answer,
     }
     data.update(overrides)
@@ -404,6 +406,49 @@ def test_a_rejected_capture_re_renders_the_form_with_the_reason(client):
     panel = work_item(client, token, rationale="no").text
     assert "rationale must be a real sentence" in panel
     assert "Lock this in" in panel
+
+
+def test_every_verification_method_reaches_the_form_with_its_explanation(client):
+    """A closed set nobody can read is a set that gets ticked at random."""
+    token = start_drill(client)
+    page = client.get(f"/drill/{token}").text
+    for method in capture_mod.VERIFICATION_METHODS:
+        assert f'value="{method.slug}"' in page
+        # Escaped, because the labels and details contain apostrophes and the
+        # template must not be emitting them raw.
+        assert str(escape(method.label)) in page
+        assert str(escape(method.detail)) in page
+
+
+def test_two_ticked_boxes_both_survive_the_post(client, tmp_path):
+    """`dict(form)` keeps only the last value; the handler must not."""
+    token = start_drill(client)
+    work_item(client, token, verification_method=["magnitude_estimate", "recomputed"])
+    client.post(
+        f"/drill/{token}/explain",
+        data={"explanation": " ".join(["matched the stem to the option and checked"] * 4)},
+    )
+
+    conn = db.connect(tmp_path / "web.db")
+    stored = conn.execute("SELECT verification_method FROM attempts").fetchone()[0]
+    conn.close()
+    assert stored == "recomputed,magnitude_estimate"
+
+
+def test_a_bad_verification_method_re_renders_with_the_other_ticks_kept(client):
+    """A rejected capture must not cost the learner the boxes they did tick."""
+    token = start_drill(client)
+    panel = work_item(
+        client, token, verification_method=["unit_check", "vibes"]
+    ).text
+    assert "vibes" in panel
+    assert 'value="unit_check" checked' in panel
+
+
+def test_claiming_both_a_check_and_no_check_is_refused_at_the_form(client):
+    token = start_drill(client)
+    panel = work_item(client, token, verification_method=["none", "unit_check"]).text
+    assert "cannot both check the answer and not check it" in panel
 
 
 def test_the_gate_must_pass_before_anything_is_recorded(client, tmp_path):

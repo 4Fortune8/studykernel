@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -49,6 +50,10 @@ templates.env.filters["delimit_math"] = mathtext.delimit
 # field on `Served`, because it is the same string for every item -- putting it
 # on the served view would make it look like something derived from the key.
 templates.env.globals["numeric_answer_pattern"] = grading.NUMERIC_INPUT_PATTERN
+# The closed set behind the verification checkboxes. A global for the same
+# reason: it is product configuration that turns the *field* on or off, but
+# the methods themselves are the same list for every item that asks.
+templates.env.globals["verification_methods"] = capture_mod.VERIFICATION_METHODS
 
 
 @asynccontextmanager
@@ -344,7 +349,13 @@ async def drill_capture(request: Request, token: str) -> HTMLResponse:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
-        form = dict(await request.form())
+        posted = await request.form()
+        form: dict[str, Any] = dict(posted)
+        # A checkbox group posts the key once per ticked box, and `dict()`
+        # keeps only the last one. Re-read it as a list so both the kernel and
+        # a re-rendered form see every method the learner actually ticked.
+        if "verification_method" in form:
+            form["verification_method"] = posted.getlist("verification_method")
 
         answer = str(form.get("answer") or "")
         if not answer.strip():

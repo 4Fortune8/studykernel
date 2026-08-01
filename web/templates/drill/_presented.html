@@ -40,11 +40,28 @@
           <textarea name="rationale" rows="3" required>{{ (submitted and submitted.rationale) or "" }}</textarea>
         </label>
       {% elif field == "verification_method" %}
-        <label class="block">
-          How did you check it? (back-substitution / magnitude estimate /
-          re-read the qualifier / unit check)
-          <input name="verification_method" value="{{ (submitted and submitted.verification_method) or '' }}">
-        </label>
+        {# A closed set, not a text box. The free-text version produced strings
+           nothing could count -- "math", "Not sure what to put here" -- which
+           is the failure mode of asking an open question at the one moment the
+           learner wants to be done. Ticking is fast enough to survive the
+           friction budget (DESIGN.md principle 10) and the values group.
+
+           Every option carries its own explanation, shown on hover and on
+           keyboard focus. Without it a closed set is worse than free text:
+           unread labels get ticked at random and random ticks look like data.
+           `title` is deliberately absent -- the CSS tooltip below says the
+           same thing, and both together give a doubled tooltip on hover. #}
+        {% set ticked = (submitted and submitted.verification_method) or [] %}
+        <fieldset class="block methods">
+          <legend>How did you check it? Tick everything you actually did.</legend>
+          {% for method in verification_methods %}
+            <label class="choice method {% if method.slug == 'none' %}nocheck{% endif %}">
+              <input type="checkbox" name="verification_method" value="{{ method.slug }}" {% if method.slug in ticked %}checked{% endif %}>
+              <span class="method-label">{{ method.label }}</span>
+              <span class="method-detail" role="note">{{ method.detail }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
       {% else %}
         <label class="block">
           {{ field.replace("_", " ") }}

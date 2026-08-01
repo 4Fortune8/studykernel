@@ -282,7 +282,11 @@ HTMX swaps a single panel; no client-side routing, no state machine in JS.
 1. **Present + capture.** Passage (if any) pinned left, item right. KaTeX on
    stem and choices. Capture fields come from `capture.active_fields(product)`
    — `verification_method` appears for products that enable it and is absent
-   for those that do not, with no UI branch of its own.
+   for those that do not, with no UI branch of its own. It renders as a
+   checkbox group over `capture.VERIFICATION_METHODS`, each option carrying
+   its explanation on hover and on keyboard focus; below the pointer
+   breakpoint the explanations are always shown in flow, because a hover
+   tooltip on a touch screen is an explanation nobody can read.
 2. **Answer + verdict.** Answer, then server grades, then verdict. Hint rungs
    requestable throughout phase 1–2. Then the explain-back gate.
 3. **Exchange.** Briefing panel, copy, paste, inline validation, one fix shown
