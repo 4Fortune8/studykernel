@@ -135,9 +135,14 @@ CREATE TABLE IF NOT EXISTS gold_labels (
 
 -- --------------------------------------------------------- learner state
 
+-- A learner is a profile. There is no login and there are no accounts: this
+-- runs on localhost for the people sitting at it. `display_name` exists so a
+-- profile switcher has something human to show; `learner_id` stays the key,
+-- so every per-learner projection below is unchanged by profiles existing.
 CREATE TABLE IF NOT EXISTS learners (
-    learner_id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL
+    learner_id   TEXT PRIMARY KEY,
+    created_at   TEXT NOT NULL,
+    display_name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS learner_state (

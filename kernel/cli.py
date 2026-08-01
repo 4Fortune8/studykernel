@@ -216,6 +216,36 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile(args: argparse.Namespace) -> int:
+    """List or create learner profiles.
+
+    A profile is a `learner_id` and a human name. There is no login: this
+    database sits on one machine and the people using it are in the room.
+    Switching is `--learner` here and a cookie in the web UI; either way the
+    profile itself lives in the database, so both front ends see the same set.
+    """
+    _, conn = _load(args)
+
+    if args.profile_command == "add":
+        db.ensure_learner(conn, args.learner_id, args.name)
+        print(f"profile {args.learner_id!r} ready")
+        return 0
+
+    profiles = db.list_profiles(conn)
+    if not profiles:
+        print("no profiles yet -- `study profile add <id> --name '...'`")
+        return 0
+    print(f"  {'learner_id':<20}{'name':<24}{'attempts':>9}")
+    for profile in profiles:
+        active = "*" if profile.learner_id == args.learner else " "
+        print(
+            f"{active} {profile.learner_id:<20}{profile.display_name:<24}"
+            f"{profile.n_attempts:>9}"
+        )
+    print("\n* is the active profile (--learner / STUDY_LEARNER)")
+    return 0
+
+
 def cmd_set(args: argparse.Namespace) -> int:
     """Record a learner-reported scalar, e.g. a scored practice essay."""
     product, conn = _load(args)
@@ -261,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("report", help="position, routes, reliability, backlog")
 
+    p_profile = sub.add_parser("profile", help="list or create learner profiles")
+    profile_sub = p_profile.add_subparsers(dest="profile_command", required=False)
+    p_profile_add = profile_sub.add_parser("add", help="create a profile")
+    p_profile_add.add_argument("learner_id")
+    p_profile_add.add_argument("--name", help="human-readable name for the switcher")
+    profile_sub.add_parser("list", help="show every profile (the default)")
+
     p_set = sub.add_parser("set", help="record a learner-reported variable")
     p_set.add_argument("name")
     p_set.add_argument("value")
@@ -275,6 +312,7 @@ COMMANDS = {
     "drill": cmd_drill,
     "record": cmd_record,
     "report": cmd_report,
+    "profile": cmd_profile,
     "set": cmd_set,
 }
 

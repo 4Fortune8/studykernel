@@ -18,9 +18,16 @@ dependencies = ["PyYAML>=6.0"]
 # Importers only. The study loop never needs these.
 ingest = ["pyarrow>=14.0", "pandas>=2.0"]
 dev = ["pytest>=7.4"]
+# The local web front end. Separate so the study loop keeps working with no
+# web install at all -- `study drill` must never depend on this resolving.
+web = ["fastapi>=0.115", "uvicorn>=0.30", "jinja2>=3.1", "python-multipart>=0.0.9"]
 
 [project.scripts]
 study = "kernel.cli:main"
+# Deliberately a function, not `uvicorn web.app:app`. See web/app.py: passing
+# the app object makes multi-worker operation structurally unavailable, and
+# drill state is an in-process dict that multiple workers would silently break.
+study-web = "web.app:run"
 
 [tool.setuptools]
 packages = [
@@ -31,11 +38,16 @@ packages = [
     "kernel.exchange",
     "kernel.storage",
     "kernel.analytics",
+    "web",
 ]
 
 [tool.setuptools.package-data]
 "kernel.storage" = ["*.sql"]
 "kernel.exchange" = ["prompts/*.md"]
+# Templates and static assets ship with the package, so `study-web` works from
+# any directory the way `study` does. KaTeX will live under static/ and is
+# bundled rather than fetched -- WEB_UI.md §3 requires it work offline.
+"web" = ["templates/*.html", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

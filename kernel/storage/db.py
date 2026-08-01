@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,27 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
 
 def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text())
+    _add_missing_columns(conn)
     conn.commit()
+
+
+# Columns added after a database already existed. `CREATE TABLE IF NOT EXISTS`
+# is a no-op on a live table, so a new column in schema.sql never reaches one
+# without this. Additive only -- nothing here rewrites or drops data, because
+# `attempts` is the append-only source of truth and a migration that can lose
+# rows is a migration that will.
+LATE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("learners", "display_name", "TEXT"),
+)
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, decl in LATE_COLUMNS:
+        present = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not present:
+            continue  # table itself is new; schema.sql already created it correctly
+        if column not in present:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # ------------------------------------------------------------------ writing
@@ -208,12 +229,49 @@ def insert_passage(conn: sqlite3.Connection, passage: dict) -> None:
     )
 
 
-def ensure_learner(conn: sqlite3.Connection, learner_id: str) -> None:
+def ensure_learner(
+    conn: sqlite3.Connection, learner_id: str, display_name: str | None = None
+) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO learners (learner_id, created_at) VALUES (?, ?)",
-        (learner_id, now()),
+        """INSERT INTO learners (learner_id, created_at, display_name)
+           VALUES (?, ?, ?)
+           ON CONFLICT (learner_id) DO UPDATE SET
+               display_name = COALESCE(excluded.display_name, learners.display_name)""",
+        (learner_id, now(), display_name),
     )
     conn.commit()
+
+
+@dataclass(frozen=True)
+class Profile:
+    """A learner, named for a human. No credentials -- see schema.sql."""
+
+    learner_id: str
+    display_name: str
+    created_at: str
+    n_attempts: int
+
+    @property
+    def used(self) -> bool:
+        """A profile with no attempts has nothing to lose if it is a typo."""
+        return self.n_attempts > 0
+
+
+def list_profiles(conn: sqlite3.Connection) -> list[Profile]:
+    """Every profile in the database, most-used first."""
+    rows = conn.execute(
+        """SELECT l.learner_id, l.created_at,
+                  COALESCE(l.display_name, l.learner_id) AS display_name,
+                  (SELECT COUNT(*) FROM attempts a WHERE a.learner_id = l.learner_id)
+                      AS n_attempts
+           FROM learners l
+           ORDER BY n_attempts DESC, l.created_at ASC"""
+    )
+    return [Profile(**dict(row)) for row in rows]
+
+
+def get_profile(conn: sqlite3.Connection, learner_id: str) -> Profile | None:
+    return next((p for p in list_profiles(conn) if p.learner_id == learner_id), None)
 
 
 # ------------------------------------------------------------------ reading

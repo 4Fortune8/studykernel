@@ -44,7 +44,9 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+import time
 from dataclasses import dataclass
+from dataclasses import field as dataclasses_field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -174,6 +176,16 @@ class _Drill:
     explanation: str | None = None
     attempt_id: int | None = None
     briefing_text: str | None = None
+    # Monotonic, not wall clock: expiry must not move when the system clock
+    # does. `started_at` stays wall clock because it is written to the log.
+    touched_at: float = dataclasses_field(default_factory=time.monotonic)
+
+
+# How long an untouched drill stays in the store. Long enough that a genuine
+# item -- read a passage, work it, write the explain-back -- never expires
+# under someone, short enough that a browser tab left open overnight does not
+# hold an item and its passage forever.
+DRILL_TTL_SECONDS = 6 * 60 * 60
 
 
 class DrillStore:
@@ -183,25 +195,48 @@ class DrillStore:
     ungraded capture and nothing else. If abandonment turns out to be worth
     measuring -- and it is diagnostic -- this grows a table behind the same
     three methods.
+
+    Abandonment is the normal case, not the exception: every drill closed by
+    closing a tab stays here otherwise, holding an item row and whatever
+    passage it hangs off. So entries expire. Sweeping on `put` means the
+    cost is paid by whoever starts the next drill and never by a background
+    thread this process does not otherwise need.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ttl_seconds: float = DRILL_TTL_SECONDS) -> None:
         self._drills: dict[str, _Drill] = {}
+        self.ttl_seconds = ttl_seconds
 
     def put(self, drill: _Drill) -> None:
+        self.sweep()
         self._drills[drill.token] = drill
 
     def get(self, token: str) -> _Drill:
-        try:
-            return self._drills[token]
-        except KeyError:
+        drill = self._drills.get(token)
+        if drill is None or self._expired(drill):
+            self._drills.pop(token, None)
             raise UnknownDrill(
-                f"no drill in progress for token {token!r} -- it expired or the "
-                "server restarted; nothing was recorded"
-            ) from None
+                f"no drill in progress for token {token!r} -- it expired, or the "
+                "server restarted. Nothing was recorded."
+            )
+        drill.touched_at = time.monotonic()
+        return drill
 
     def drop(self, token: str) -> None:
         self._drills.pop(token, None)
+
+    def sweep(self) -> int:
+        """Discard expired drills. Returns how many went."""
+        stale = [t for t, d in self._drills.items() if self._expired(d)]
+        for token in stale:
+            del self._drills[token]
+        return len(stale)
+
+    def _expired(self, drill: _Drill) -> bool:
+        return (time.monotonic() - drill.touched_at) > self.ttl_seconds
+
+    def __len__(self) -> int:
+        return len(self._drills)
 
 
 DEFAULT_STORE = DrillStore()

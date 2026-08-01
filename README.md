@@ -22,6 +22,9 @@ kernel/          installable package; contains no exam names (CI-enforced)
   session.py     the drill loop, headless; front ends are adapters over it
   storage/       SQLite, append-only activity log
   cli.py         the terminal adapter
+web/             the local web adapter (FastAPI); same purity rule as kernel/
+  app.py         routes + the single-worker entry point
+  templates/     Jinja2; static/ holds one CSS file (KaTeX will live here)
 products/
   tsi-ready/     Product 1: threshold objective, seeded taxonomy
   gre-forge/     Product 2 sketch: deadline(maximize), learned DAG
@@ -40,6 +43,9 @@ system setuptools on some distributions is older than that:
 python3 -m pip install --user --upgrade 'setuptools>=68'
 python3 -m pip install -e '.[ingest,dev]' --no-build-isolation
 ```
+
+Three optional extras, kept separate so the study loop never depends on any of
+them resolving: `ingest` (importers), `dev` (pytest), `web` (the browser UI).
 
 If `study` is still not found afterwards, `~/.local/bin` is not on your PATH.
 Every command below also works without installing anything, as
@@ -61,6 +67,39 @@ study record <attempt_id>                 # paste the returned JSON block
 `--product` has no default: the kernel is not allowed to know which products
 exist. Set `STUDY_PRODUCT` or pass the flag.
 
+## Profiles
+
+Two people can share one install. A profile is a `learner_id` and a name —
+there is no login and there are no passwords, because this runs on localhost
+for whoever is sitting at it. Ratings, attempts and objective position are all
+keyed by learner, so profiles do not mix.
+
+```bash
+study profile add alex --name "Alex"
+study profile                             # list; * marks the active one
+study --learner alex drill                # or export STUDY_LEARNER=alex
+```
+
+In the browser the profile lives in the database and the *selection* lives in
+a cookie, so two people at two devices can use the same server at once without
+switching each other.
+
+## Web UI
+
+```bash
+python3 -m pip install -e '.[web]' --no-build-isolation
+STUDY_PRODUCT=products/tsi-ready study-web        # http://127.0.0.1:8000
+```
+
+Skeleton only so far — profile switcher and the app shell. The drill and
+report pages are WEB_UI.md phase 1.
+
+`study-web` runs a single uvicorn worker and there is no flag to change that.
+In-progress drills live in an in-process dict, so a second worker would fail
+to find roughly half of them and lose blind captures. The entry point passes
+uvicorn the app *object* rather than an import string, which is what makes
+forking workers unavailable rather than merely discouraged.
+
 ## The loop
 
 Capture (blind) → grade (deterministic) → tutor briefing out → record in.
@@ -79,8 +118,10 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 
 1. **What to study is goal-optimized; how to study never is.** Objectives set
    priority; pedagogy sets method and is invariant across all of them.
-2. **No kernel code may name an exam.** `tests/kernel_purity_test.py` enforces
-   it. It caught three violations in the first hour of this scaffold.
+2. **No kernel or front-end code may name an exam.**
+   `tests/kernel_purity_test.py` scans `kernel/` and `web/` and enforces it.
+   Three violations in the first hour of the scaffold; one more the minute the
+   scan was extended to `web/`.
 3. **One allocator, plural objectives.** Threshold logic never leaks into the
    scheduler; scheduler logic never leaks into an objective.
 4. **The model never grades; the model never authors items.**
@@ -96,9 +137,9 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 
 ## Status
 
-v0 scaffold. The loop runs end to end on ~8,200 imported items, 104 tests
-pass, and the drill loop is extracted into `kernel/session.py` ahead of the
-local web UI ([WEB_UI.md](WEB_UI.md)).
+v0 scaffold. The loop runs end to end on ~8,200 imported items, 123 tests
+pass, the drill loop is extracted into `kernel/session.py`, and the web
+package exists as a shell with profile switching ([WEB_UI.md](WEB_UI.md)).
 
 Current focus is math and ELAR multiple choice; the essay loop is deferred.
 What is not built: FSRS retention, learned-edge accrual, batch labeling and

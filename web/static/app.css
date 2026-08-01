@@ -1,0 +1,110 @@
+/* One file, no framework. WEB_UI.md §3. */
+
+:root {
+  --bg: #fbfbf9;
+  --fg: #1b1b1a;
+  --muted: #6a6a66;
+  --rule: #ddddd7;
+  --accent: #1f5c4a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a;
+    --fg: #e8e8e4;
+    --muted: #9a9a94;
+    --rule: #33343a;
+    --accent: #7fc4ab;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 ui-serif, Georgia, "Times New Roman", serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+nav a { color: var(--accent); }
+
+main {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1 { font-size: 1.6rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; margin: 2.5rem 0 0.75rem; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+}
+
+.note {
+  color: var(--muted);
+  border-left: 2px solid var(--rule);
+  padding-left: 0.9rem;
+}
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rule); }
+th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.active td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+.badge {
+  font-size: 0.75rem;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+form.stack { display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; max-width: 22rem; }
+label { display: flex; gap: 0.5rem; align-items: center; width: 100%; justify-content: space-between; }
+
+input {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* Wide content scrolls in its own box; the page body never scrolls sideways. */
+main > table { display: block; overflow-x: auto; }

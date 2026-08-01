@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Profiles &middot; studykernel{% endblock %}
+
+{% block content %}
+<h1>Profiles</h1>
+<p class="note">
+  No accounts and no passwords. A profile picks which learner's ratings,
+  attempts and objective position you are looking at. Anyone at this machine
+  can switch to any of them.
+</p>
+
+{% if profiles %}
+<table>
+  <thead>
+    <tr><th>Profile</th><th>id</th><th class="num">Attempts</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for p in profiles %}
+    <tr {% if p.learner_id == active %}class="active"{% endif %}>
+      <td>{{ p.display_name }}</td>
+      <td><code>{{ p.learner_id }}</code></td>
+      <td class="num">{{ p.n_attempts }}</td>
+      <td>
+        {% if p.learner_id == active %}
+          <span class="badge">active</span>
+        {% else %}
+          <form method="post" action="/profiles/switch">
+            <input type="hidden" name="learner_id" value="{{ p.learner_id }}">
+            <button type="submit">Switch</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No profiles yet.</p>
+{% endif %}
+
+<h2>Add a profile</h2>
+<form method="post" action="/profiles/add" class="stack">
+  <label>id <input name="learner_id" required placeholder="alex" pattern="[A-Za-z0-9_-]+"></label>
+  <label>name <input name="display_name" placeholder="Alex"></label>
+  <button type="submit">Create and switch</button>
+</form>
+{% endblock %}

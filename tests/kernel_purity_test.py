@@ -17,7 +17,13 @@ from pathlib import Path
 
 import pytest
 
-KERNEL = Path(__file__).resolve().parent.parent / "kernel"
+ROOT = Path(__file__).resolve().parent.parent
+KERNEL = ROOT / "kernel"
+# The web front end is held to the same rule. It is an adapter over the kernel,
+# exactly as `cli.py` is, and a front end that hardcodes one product is a fork
+# of the UI waiting to happen -- the same failure this test exists to catch,
+# one layer out. It ships in the same wheel; it obeys the same rule.
+SCANNED = (KERNEL, ROOT / "web")
 
 # Exam and product names. Anything here appearing in kernel/ is a bug.
 FORBIDDEN = (
@@ -60,8 +66,10 @@ WORD = re.compile(r"[a-z][a-z0-9_-]*", re.IGNORECASE)
 def kernel_files() -> list[Path]:
     return sorted(
         p
-        for p in KERNEL.rglob("*")
-        if p.suffix in {".py", ".sql", ".md", ".yaml", ".yml"}
+        for root in SCANNED
+        if root.exists()
+        for p in root.rglob("*")
+        if p.suffix in {".py", ".sql", ".md", ".yaml", ".yml", ".html", ".css"}
         and "__pycache__" not in p.parts
     )
 

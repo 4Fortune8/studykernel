@@ -45,9 +45,16 @@ here are not the defaults you would assume.
 |---|---|---|
 | Python | 3.10, not 3.11+ | `datetime.UTC` does not exist. Use `timezone.utc`. This already bit once. |
 | setuptools | was 59, upgraded to 83 | 59 predates PEP 660, so `pip install -e .` fails outright |
+| pip | was 22.0.2 (system), upgraded to **26.2** in `~/.local` | 22.0.2 has no `--dry-run`, so you cannot check a resolution without performing it |
 | git-lfs | **not installed** | LFS-pointer files look like real files at 130 bytes |
 | `study` | at `~/.local/bin/study` | already on the fish PATH |
 | fastapi | not installed | needed before any WEB_UI.md work starts |
+
+The web dependencies **do** resolve to prebuilt aarch64 wheels on this box —
+checked with `pip install --dry-run fastapi uvicorn jinja2`, which pulls
+`pydantic_core-2.46.4-cp310-cp310-manylinux_2_17_aarch64.whl`. No Rust
+toolchain, no source build. That was the real risk on an ARM SBC, and it is
+not one.
 
 Install, if the venv/package ever needs rebuilding:
 
@@ -203,7 +210,55 @@ used to live in control flow:
   learner's self-report. The CLI still self-reports; a web front end serving
   rungs one at a time gets a measurement for free (§4.2).
 
-Next: WEB_UI.md phase 1, then phase 2.
+### The web package exists (shell only)
+
+`web/` is a real package in the wheel — `study-web` console script, FastAPI
+app, `deps.py`, templates, one CSS file. What works: profile switching. What
+does not exist yet: `Now`, the drill flow, `Report`. The `[web]` extra
+resolves to prebuilt aarch64 wheels on this machine (see §2).
+
+Three decisions baked in, each answering a trap named before it was built:
+
+1. **Single worker, structurally.** `study-web` calls `uvicorn.run(app, ...)`
+   with the app *object*. Uvicorn can only fork workers from an import string,
+   so `--workers 2` is not available rather than merely inadvisable. Under two
+   workers a drill started on one is `UnknownDrill` on the other about half
+   the time, and the learner loses a blind capture they cannot honestly
+   rewrite.
+2. **A lost drill is a page, not a traceback.** `UnknownDrill` has a handler
+   returning 410 and `drill_lost.html`, which says that nothing was recorded.
+   Restart-mid-drill happens with one worker too.
+3. **Drills expire.** `DrillStore` sweeps on `put` with a 6-hour idle TTL,
+   refreshed on every access. Abandonment is the normal way a drill ends —
+   closing a tab — and without expiry the store grew for the life of the
+   process, holding an item row and its passage per entry.
+
+The purity test now scans `web/` as well as `kernel/`, on the grounds that a
+front end hardcoding one product is the same fork risk one layer out. It
+caught a violation in `web/deps.py` within a minute of being extended: an
+error message naming a product pack in its example. It keeps earning its keep.
+
+### Profiles
+
+Two people can share the install. `learners` gained a nullable `display_name`;
+everything else was already keyed by `learner_id`, so no other schema changed.
+
+- CLI: `study profile add <id> --name "..."`, `study profile`, `--learner`.
+- Web: profile in the database, **selection in a cookie**. A server-side
+  "current profile" would mean two devices could not be used at once and
+  switching on one would silently move the other.
+- No credentials anywhere, by design. Anyone at the machine can switch to any
+  profile. It separates data; it does not protect it.
+
+`db.migrate()` gained an additive `ALTER TABLE` pass (`LATE_COLUMNS`), because
+`CREATE TABLE IF NOT EXISTS` is a no-op on a live table and a new column would
+otherwise never reach an existing `study.db`. Verified on a copy of the real
+database: column added, 8,169 items and the attempt log untouched.
+
+Next: WEB_UI.md phase 1 — starting with `DrillSession.recommend()`, which
+`Now` needs and which does not exist. `start()` currently couples deciding
+what to study with reserving an item, so the home page cannot ask the first
+question without answering the second.
 
 ### Priority (2026-08-01)
 

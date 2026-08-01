@@ -126,6 +126,13 @@ def drill(conn, pack):
     return session.DrillSession(conn, pack, "learner", store=session.DrillStore())
 
 
+@pytest.fixture
+def drill_store_session(conn, pack):
+    """A session plus a handle on its store, for the expiry tests."""
+    store = session.DrillStore()
+    return session.DrillSession(conn, pack, "learner", store=store), store
+
+
 def good_capture():
     return capture_mod.Capture(
         confidence=2,
@@ -343,6 +350,48 @@ def test_a_well_formed_diagnosis_records(drill, conn):
 def test_recording_against_a_missing_attempt_is_refused(drill):
     with pytest.raises(session.record_mod.RecordError):
         drill.record(9999, "{}")
+
+
+# -------------------------------------------------------- store expiry
+
+
+def test_an_abandoned_drill_expires(conn, pack):
+    """Closing a tab is the normal way a drill ends, not an edge case.
+
+    Without expiry the store grows for the life of the process, each entry
+    holding an item row and whatever passage it hangs off.
+    """
+    drill = session.DrillSession(conn, pack, "learner", store=session.DrillStore(ttl_seconds=0))
+    served = drill.start()
+    with pytest.raises(session.UnknownDrill):
+        drill.submit_capture(served.token, good_capture())
+
+
+def test_sweeping_reclaims_abandoned_drills(conn, pack):
+    store = session.DrillStore(ttl_seconds=0)
+    drill = session.DrillSession(conn, pack, "learner", store=store)
+    drill.start()
+    drill.start()
+    assert len(store) == 1  # `put` sweeps, so the second start already reclaimed the first
+    assert store.sweep() == 1
+    assert len(store) == 0
+
+
+def test_working_on_a_drill_keeps_it_alive(conn, pack):
+    """Expiry is idle time, not wall time since the item was served."""
+    store = session.DrillStore(ttl_seconds=30)
+    drill = session.DrillSession(conn, pack, "learner", store=store)
+    served = drill.start()
+    before = store.get(served.token).touched_at
+    drill.request_hint(served.token, 1)
+    assert store.get(served.token).touched_at >= before
+
+
+def test_a_live_drill_is_not_swept(drill_store_session):
+    drill, store = drill_store_session
+    served = drill.start()
+    assert store.sweep() == 0
+    assert drill.submit_capture(served.token, good_capture()).token == served.token
 
 
 # ---------------------------------------------------- starvation and stop
