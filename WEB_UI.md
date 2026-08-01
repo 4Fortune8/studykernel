@@ -316,9 +316,11 @@ HANDOFF.md §6.
 - [x] FastAPI skeleton, `deps.py` — bundled KaTeX still outstanding
 - [x] `Now` page with all three states, satisfied state included from day one
 - [x] Profile switching (not in the original plan; see HANDOFF.md)
-- [ ] Drill flow, three phases, with the §4.1 key-absence test in the suite
-- [ ] Observed `min_hint_level` (§4.2)
-- [ ] Exchange panel with inline validation
+- [x] Drill flow, three phases, with the §4.1 key-absence test in the suite
+- [x] Observed `min_hint_level` (§4.2)
+- [x] Exchange panel with inline validation
+- [ ] Bundled KaTeX — **the last thing standing between this and being usable
+      for math.** ~3,000 LaTeX-dense items currently render as source.
 - [ ] `Report` page, CLI parity
 
 **Phase 2 — the reading half.**

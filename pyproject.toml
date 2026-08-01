@@ -17,7 +17,9 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 # Importers only. The study loop never needs these.
 ingest = ["pyarrow>=14.0", "pandas>=2.0"]
-dev = ["pytest>=7.4"]
+# httpx backs fastapi's TestClient, which is how the web invariants in
+# tests/test_web.py are checked over real HTTP rather than by calling handlers.
+dev = ["pytest>=7.4", "httpx>=0.27"]
 # The local web front end. Separate so the study loop keeps working with no
 # web install at all -- `study drill` must never depend on this resolving.
 web = ["fastapi>=0.115", "uvicorn>=0.30", "jinja2>=3.1", "python-multipart>=0.0.9"]

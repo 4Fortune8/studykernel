@@ -18,6 +18,7 @@ switcher, and the two things that have to be right before any page is written.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -26,6 +27,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from kernel import session
+from kernel.exchange import record as record_mod
+from kernel.pedagogy import capture as capture_mod
 from kernel.session import UnknownDrill
 from kernel.storage import db
 from web import deps
@@ -33,7 +36,25 @@ from web import deps
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 
-app = FastAPI(title="studykernel", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Run the migration once at boot rather than failing per request.
+
+    Only `study init` called `migrate()` before, so a database created by an
+    earlier version reaches the web layer missing columns and every page dies
+    on a raw sqlite error. The migration is additive and idempotent -- it adds
+    tables and columns and rewrites nothing -- so running it here costs
+    nothing and removes a footgun the user cannot diagnose from a 500.
+    """
+    conn = deps.connect()
+    try:
+        db.migrate(conn)
+    finally:
+        conn.close()
+    yield
+
+
+app = FastAPI(title="studykernel", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
@@ -134,6 +155,180 @@ async def home(request: Request) -> HTMLResponse:
                 # is "stop", and a progress readout invites one more session.
                 "position": None if isinstance(choice, session.Satisfied) else drill.position(),
             },
+        )
+    finally:
+        conn.close()
+
+
+# -------------------------------------------------------------------- drill
+
+
+def _session(request: Request, conn) -> session.DrillSession | None:
+    learner = deps.active_learner(request.cookies, conn)
+    if learner is None:
+        return None
+    return session.DrillSession(conn, deps.load_product(), learner)
+
+
+def _panel(request: Request, drill: session.DrillSession, token: str, **extra):
+    """Render the partial for whatever phase this drill is actually at.
+
+    Phase comes from the server every time, so a refresh, a back button or a
+    double-submit redraws the truth instead of replaying a step. The browser
+    holds a token and nothing else.
+    """
+    view = drill.view(token)
+    context = {"view": view, "served": view.served, "token": token, **extra}
+    if view.phase is session.Phase.BRIEFED or view.phase is session.Phase.EXPLAINED:
+        context.setdefault("briefing", drill.briefing(token))
+    return templates.TemplateResponse(
+        request=request, name=f"drill/_{view.phase.value}.html", context=context
+    )
+
+
+@app.post("/drill/start")
+async def drill_start(request: Request, tag: str = Form("")) -> RedirectResponse:
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        served = drill.start(tag=tag or None)
+        if not isinstance(served, session.Served):
+            # Satisfied or starved -- `Now` is the page that says so properly.
+            return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"/drill/{served.token}", status_code=303)
+    finally:
+        conn.close()
+
+
+@app.get("/drill/{token}", response_class=HTMLResponse)
+async def drill_page(request: Request, token: str) -> HTMLResponse:
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        view = drill.view(token)
+        briefing = (
+            drill.briefing(token)
+            if view.phase in (session.Phase.EXPLAINED, session.Phase.BRIEFED)
+            else None
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="drill/page.html",
+            context={
+                "view": view,
+                "served": view.served,
+                "token": token,
+                "briefing": briefing,
+                "max_hint": session.hints.MAX_LEVEL,
+            },
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/hint", response_class=HTMLResponse)
+async def drill_hint(request: Request, token: str, level: int = Form(...)) -> HTMLResponse:
+    """One rung, one request. WEB_UI.md §4.2.
+
+    The ladder is never shipped whole and revealed client-side: the server
+    hands over exactly the rung that was asked for and records that it did, so
+    `min_hint_level` is a measurement rather than a self-report.
+    """
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        rung = drill.request_hint(token, level)
+        return templates.TemplateResponse(
+            request=request,
+            name="drill/_rung.html",
+            context={"rung": rung, "token": token, "next_level": level + 1,
+                     "max_hint": session.hints.MAX_LEVEL},
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/capture", response_class=HTMLResponse)
+async def drill_capture(request: Request, token: str) -> HTMLResponse:
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        form = dict(await request.form())
+        fields = drill.view(token).served.capture_fields
+        try:
+            drill.submit_capture(token, session.build_capture(form, fields))
+        except capture_mod.CaptureError as exc:
+            # Rejected captures do not advance the phase, so re-rendering the
+            # panel puts the learner back on the same form with the reason.
+            return _panel(request, drill, token, error=str(exc), submitted=form)
+        return _panel(request, drill, token)
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/answer", response_class=HTMLResponse)
+async def drill_answer(request: Request, token: str, answer: str = Form("")) -> HTMLResponse:
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        drill.submit_answer(token, answer)
+        return _panel(request, drill, token)
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/explain", response_class=HTMLResponse)
+async def drill_explain(
+    request: Request, token: str, explanation: str = Form("")
+) -> HTMLResponse:
+    """The gate. There is no skip route here and there is not meant to be one."""
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        gate = drill.submit_explain_back(token, explanation)
+        if not gate.passed:
+            return _panel(request, drill, token, error=gate.reason, submitted={
+                "explanation": explanation
+            })
+        return _panel(request, drill, token)
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/record", response_class=HTMLResponse)
+async def drill_record(request: Request, token: str, pasted: str = Form("")) -> HTMLResponse:
+    """Inbound half of the exchange, validated inline. WEB_UI.md §4.5."""
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        briefing = drill.briefing(token)
+        try:
+            diagnosis = drill.record_for(token, pasted)
+        except record_mod.RecordError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="drill/_exchange_result.html",
+                context={"error": str(exc), "token": token, "briefing": briefing,
+                         "pasted": pasted},
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="drill/_exchange_result.html",
+            context={"diagnosis": diagnosis, "token": token, "briefing": briefing},
         )
     finally:
         conn.close()

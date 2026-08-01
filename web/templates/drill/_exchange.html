@@ -1,0 +1,35 @@
+{# Phase 3: the exchange. Protocol unchanged from the CLI (DESIGN.md §10) --
+   briefing out, one structured JSON block back, rejected on item_id mismatch.
+   What improves is the ergonomics around it (WEB_UI.md §4.5). #}
+<section class="phase">
+  <h2>Attempt {{ briefing.attempt_id }} recorded</h2>
+  <p class="note">
+    The gate passed, so the attempt is in the log and the ratings have moved.
+    Everything below is the tutoring exchange, which is optional in the sense
+    that nothing breaks without it — and the whole point in every other sense.
+  </p>
+
+  <h2>Briefing</h2>
+  <p class="note">
+    Paste this into whatever chat client you like. There is no API and does
+    not need to be one. <code>prompt_version {{ briefing.prompt_version }}</code>
+  </p>
+
+  <div class="briefing-tools">
+    <button type="button" class="ghost" onclick="
+      navigator.clipboard.writeText(document.getElementById('briefing-text').textContent)
+        .then(() => { this.textContent = 'Copied'; });
+    ">Copy briefing</button>
+  </div>
+  <pre id="briefing-text" class="briefing">{{ briefing.text }}</pre>
+
+  <h2>Paste the reply</h2>
+  <div id="exchange-result">
+    {% if view.diagnosis %}
+      {% set diagnosis = view.diagnosis %}
+      {% include "drill/_exchange_result.html" %}
+    {% else %}
+      {% include "drill/_exchange_form.html" %}
+    {% endif %}
+  </div>
+</section>

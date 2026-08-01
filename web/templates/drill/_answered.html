@@ -1,0 +1,36 @@
+{# Phase 2, second half: verdict, then the gate. WEB_UI.md §4.3.
+
+   No skip button, no "remind me later", no way past this but through. The
+   friction here *is* the mechanism (DESIGN.md principle 10), and nothing is
+   recorded until it passes -- leaving now means the attempt never existed. #}
+<section class="phase">
+  <h2 class="verdict {{ 'right' if view.verdict.correct else 'wrong' }}">
+    {{ "Correct" if view.verdict.correct else "Wrong" }}
+  </h2>
+  <p>
+    Key: <code>{{ view.verdict.answer_key }}</code>
+    &nbsp;·&nbsp; you answered <code>{{ view.verdict.answer_given }}</code>
+  </p>
+  <p class="note">
+    Lowest hint level needed: <strong>L{{ view.verdict.min_hint_level }}</strong>
+    — competence {{ "%.2f"|format(view.verdict.competence) }}. This is the
+    number correctness cannot express: solving at L1 and at L4 both read
+    "correct".
+  </p>
+
+  <h2>Explain it back</h2>
+  <p class="note">
+    The solution path in your own words. Articulating it is what encodes it,
+    which is why there is no skip.
+  </p>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form hx-post="/drill/{{ token }}/explain" hx-target="#panel" class="stack wide">
+    <label class="block">
+      <textarea name="explanation" rows="5" required
+        placeholder="How you got there — the path, not the answer.">{{ (submitted and submitted.explanation) or "" }}</textarea>
+    </label>
+    <button type="submit">Submit explanation</button>
+  </form>
+</section>

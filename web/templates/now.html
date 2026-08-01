@@ -34,13 +34,12 @@
     </p>
   {% endif %}
 
-  <p class="do">
-    <code>study drill --tag {{ choice.tag_slug }}</code>
-  </p>
+  <form method="post" action="/drill/start" class="do">
+    <input type="hidden" name="tag" value="{{ choice.tag_slug }}">
+    <button type="submit" class="start">Start</button>
+  </form>
   <p class="note">
-    The drill loop still runs in the terminal. The browser version is the next
-    thing to be built (WEB_UI.md §5.2); until then this page decides what to
-    work on and the terminal does it.
+    Or in the terminal: <code>study drill --tag {{ choice.tag_slug }}</code>
   </p>
 
   <h2>Why this</h2>

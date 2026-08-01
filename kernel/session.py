@@ -166,6 +166,26 @@ class Verdict:
 
 
 @dataclass(frozen=True)
+class DrillView:
+    """A drill in progress, re-derived from server state.
+
+    Exists so a browser refresh is harmless: the phase lives on the server, so
+    reloading re-renders where you actually are rather than restarting or
+    double-recording. `verdict` is `None` until the answer is in, which is the
+    same §4.1 guarantee as `Served` -- the key cannot reach a template early
+    because there is nothing holding it.
+    """
+
+    phase: Phase
+    served: Served
+    verdict: Verdict | None = None
+    rungs_shown: list[hints.Rung] = dataclasses_field(default_factory=list)
+    explanation: str | None = None
+    attempt_id: int | None = None
+    diagnosis: record_mod.Diagnosis | None = None
+
+
+@dataclass(frozen=True)
 class Briefing:
     text: str
     attempt_id: int
@@ -189,8 +209,13 @@ class _Drill:
     passage: str | None
     capture_fields: list[str]
     started_at: str
+    target_band: tuple[float, float]
     phase: Phase = Phase.PRESENTED
     highest_rung_served: int = 0
+    # Every rung handed over, in the order asked for. `highest_rung_served` is
+    # the metric; this is what a front end redraws after a refresh, and the
+    # two are not the same list -- a learner may ask for L3 and then L1.
+    rungs_shown: list[int] = dataclasses_field(default_factory=list)
     capture: capture_mod.Capture | None = None
     answer_given: str | None = None
     correct: bool | None = None
@@ -198,6 +223,7 @@ class _Drill:
     explanation: str | None = None
     attempt_id: int | None = None
     briefing_text: str | None = None
+    diagnosis: record_mod.Diagnosis | None = None
     # Monotonic, not wall clock: expiry must not move when the system clock
     # does. `started_at` stays wall clock because it is written to the log.
     touched_at: float = dataclasses_field(default_factory=time.monotonic)
@@ -361,19 +387,48 @@ class DrillSession:
             passage=db.load_passage(self.conn, item["passage_id"]),
             capture_fields=capture_mod.active_fields(self.product),
             started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            target_band=alloc.target_band,
         )
         self.store.put(drill)
 
+        return self._serve(drill, alloc.target_band)
+
+    def view(self, token: str) -> DrillView:
+        """Where this drill is, so a refresh redraws instead of restarting."""
+        drill = self.store.get(token)
+        verdict = None
+        if drill.phase in (Phase.ANSWERED, Phase.EXPLAINED, Phase.BRIEFED):
+            verdict = Verdict(
+                correct=bool(drill.correct),
+                answer_key=drill.item["answer_key"],
+                answer_given=drill.answer_given or "",
+                min_hint_level=drill.min_hint_level,
+                competence=hints.competence_score(
+                    drill.min_hint_level, bool(drill.correct)
+                ),
+            )
+        return DrillView(
+            phase=drill.phase,
+            served=self._serve(drill, drill.target_band),
+            verdict=verdict,
+            rungs_shown=[hints.rung(level) for level in drill.rungs_shown],
+            explanation=drill.explanation,
+            attempt_id=drill.attempt_id,
+            diagnosis=drill.diagnosis,
+        )
+
+    @staticmethod
+    def _serve(drill: _Drill, target_band: tuple[float, float]) -> Served:
         return Served(
             token=drill.token,
-            item_id=item["item_id"],
+            item_id=drill.item["item_id"],
             tag_slug=drill.tag_slug,
             routed_from=drill.routed_from,
-            stem=item["stem"],
+            stem=drill.item["stem"],
             choices=drill.choices,
             passage=drill.passage,
-            section_slug=item["section_slug"],
-            target_band=alloc.target_band,
+            section_slug=drill.item["section_slug"],
+            target_band=target_band,
             capture_fields=drill.capture_fields,
         )
 
@@ -389,6 +444,8 @@ class DrillSession:
         self._require(drill, Phase.PRESENTED, Phase.CAPTURED)
         rung = hints.rung(level)  # validates the range
         drill.highest_rung_served = max(drill.highest_rung_served, level)
+        if level not in drill.rungs_shown:
+            drill.rungs_shown.append(level)
         return rung
 
     def submit_capture(self, token: str, capture: capture_mod.Capture) -> Accepted:
@@ -515,8 +572,31 @@ class DrillSession:
             item_id=item["item_id"],
         )
 
+    def record_for(self, token: str, pasted_text: str) -> record_mod.Diagnosis:
+        """`record()` for a drill still in hand, keyed by token.
+
+        The token-holding caller should use this rather than `record()`: the
+        attempt id comes from the drill, so a stale form cannot aim a
+        diagnosis at some other attempt by supplying its own. It also refuses
+        to record twice, which a browser refresh would otherwise do.
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.EXPLAINED, Phase.BRIEFED)
+        if drill.diagnosis is not None:
+            raise record_mod.RecordError(
+                f"attempt {drill.attempt_id} already has a diagnosis recorded"
+            )
+        diagnosis = self.record(int(drill.attempt_id), pasted_text)  # type: ignore[arg-type]
+        drill.diagnosis = diagnosis
+        return diagnosis
+
     def finish(self, token: str) -> None:
-        """Release in-flight state. The attempt is already durable."""
+        """Release in-flight state. The attempt is already durable.
+
+        Not called after recording: a browser that refreshes the page it is
+        already on should see the drill it just completed, not a message
+        claiming nothing was written. Expiry reclaims it instead.
+        """
         self.store.drop(token)
 
     # -- the inbound half, later and possibly in another process ----------

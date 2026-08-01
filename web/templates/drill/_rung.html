@@ -1,0 +1,14 @@
+{# Appended to #rungs. The button is replaced out of band so the ladder
+   advances one step and never unrolls. #}
+{% include "drill/_rung_body.html" %}
+<div id="hint-control" hx-swap-oob="true">
+  {% if next_level <= max_hint %}
+    <form hx-post="/drill/{{ token }}/hint" hx-target="#rungs" hx-swap="beforeend">
+      <input type="hidden" name="level" value="{{ next_level }}">
+      <button type="submit" class="ghost">Hint L{{ next_level }}</button>
+      <span class="note inline">each rung is recorded; it is the competence metric</span>
+    </form>
+  {% else %}
+    <p class="note">Ladder exhausted. L{{ max_hint }} means the solution was handed over.</p>
+  {% endif %}
+</div>

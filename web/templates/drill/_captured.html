@@ -1,0 +1,14 @@
+{# Phase 2, first half: the answer. Still no key on the page -- grading
+   happens on the server, which falls out of §4.1 for free (§4.4). #}
+<section class="phase">
+  <h2>Your answer</h2>
+  <p class="note">Capture is locked. Hints are still available above and are still recorded.</p>
+
+  <form hx-post="/drill/{{ token }}/answer" hx-target="#panel" class="stack wide">
+    <label class="block">
+      Answer
+      <input name="answer" autocomplete="off" autofocus>
+    </label>
+    <button type="submit">Submit and grade</button>
+  </form>
+</section>

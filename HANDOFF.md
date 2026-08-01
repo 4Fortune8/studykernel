@@ -293,10 +293,51 @@ session — §6's whole point.
 flow does not exist yet. That is honest and useful today: the page decides
 what to study, the terminal does it. It becomes a real button in §5.2.
 
-Next: the drill flow (WEB_UI.md §5.2), which is the last thing standing
-between this and not needing the terminal. Then bundled KaTeX, which is the
-reason the UI exists at all — ~3,000 LaTeX-dense items are unreadable as
-source.
+### The drill flow
+
+Built, and the whole loop runs in the browser: present → blind capture →
+answer → verdict → gate → briefing → paste → diagnosis. HTMX is vendored at
+`web/static/vendor/htmx.min.js` (51 KB, no build step, works offline).
+
+`DrillSession.view(token)` was the piece this needed. Phase lives on the
+server, so `GET /drill/{token}` re-renders wherever the drill actually is —
+refresh, back button and double-submit all redraw the truth instead of
+replaying a step. The browser holds a token and nothing else.
+
+`tests/test_web.py` drives all of it over real HTTP via `TestClient`. The
+§4.1 leak test WEB_UI.md asks for is there, and it caught a mistake worth
+recording: the first version of it ran against real RACE data whose key was
+the single letter `D`, which matches inside `<div>`. It reported a leak that
+was not one. The suite version uses a distinctive key (`quokka-7`) and strips
+the rendered choice list — where the keyed string legitimately appears as one
+option among four — before asserting the key is absent from everything else.
+**A leak test on a one-character key is worthless; it will pass on noise or
+fail on it.**
+
+Two behaviours worth knowing:
+
+- **`min_hint_level` is now measured, not reported.** Requesting L1 in the
+  browser and then answering yields `L1` with no self-report anywhere — the
+  CLI's "lowest hint level you needed" prompt has no equivalent here and does
+  not need one. Confirmed end to end on a copy of the real database.
+- **`record_for(token, …)`** replaces `record(attempt_id, …)` for the web,
+  which takes the attempt id from the drill rather than the form and refuses
+  a second diagnosis for one attempt. `finish()` is deliberately *not* called
+  after recording: dropping the token made a refresh render "nothing was
+  recorded" when the attempt was in fact in the log. Expiry reclaims it.
+
+The web app now runs `db.migrate()` at startup. Only `study init` called it
+before, so an older database reached the web layer missing `display_name` and
+every page died on a raw sqlite error — which is exactly what happened the
+first time it was pointed at a copy of the real `study.db`.
+
+> **Run `study init` once against your real database** (or just start the web
+> app) if you have not since the profiles change. Additive and idempotent.
+
+Next: **bundled KaTeX**. It is the last item in phase 1 and the reason the UI
+exists at all — ~3,000 LaTeX-dense MATH items still render as source, so the
+browser is currently better than the terminal for reading (passages pinned)
+and no better for math. After that, the `Report` page.
 
 ### Priority (2026-08-01)
 

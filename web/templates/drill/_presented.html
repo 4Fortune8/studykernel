@@ -1,0 +1,47 @@
+{# Phase 1: blind capture. WEB_UI.md §4.1.
+
+   There is no answer key in this template and there cannot be one: the only
+   item data in scope is `served`, whose type has no such field. The key
+   arrives with the verdict, after this is persisted. #}
+<section class="phase">
+  <h2>Before you answer</h2>
+  <p class="note">
+    The key is not on this page — not hidden, not sent. Write this blind; it
+    is what the diagnosis reads to find where your reasoning diverged.
+  </p>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form hx-post="/drill/{{ token }}/capture" hx-target="#panel" class="stack wide">
+    {% for field in served.capture_fields %}
+      {% if field == "confidence" %}
+        <label class="block">
+          How sure are you?
+          <select name="confidence" required>
+            <option value="">—</option>
+            <option value="1" {% if submitted and submitted.confidence == "1" %}selected{% endif %}>1 — guess</option>
+            <option value="2" {% if submitted and submitted.confidence == "2" %}selected{% endif %}>2 — fairly sure</option>
+            <option value="3" {% if submitted and submitted.confidence == "3" %}selected{% endif %}>3 — certain</option>
+          </select>
+        </label>
+      {% elif field == "rationale" %}
+        <label class="block">
+          In two sentences, why is your answer right?
+          <textarea name="rationale" rows="3" required>{{ (submitted and submitted.rationale) or "" }}</textarea>
+        </label>
+      {% elif field == "verification_method" %}
+        <label class="block">
+          How did you check it? (back-substitution / magnitude estimate /
+          re-read the qualifier / unit check)
+          <input name="verification_method" value="{{ (submitted and submitted.verification_method) or '' }}">
+        </label>
+      {% else %}
+        <label class="block">
+          {{ field.replace("_", " ") }}
+          <input name="{{ field }}" value="{{ (submitted and submitted[field]) or '' }}">
+        </label>
+      {% endif %}
+    {% endfor %}
+    <button type="submit">Lock this in</button>
+  </form>
+</section>

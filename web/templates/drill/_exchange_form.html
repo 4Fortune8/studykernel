@@ -1,0 +1,7 @@
+<form hx-post="/drill/{{ token }}/record" hx-target="#exchange-result" class="stack wide">
+  <label class="block">
+    <textarea name="pasted" rows="6" required
+      placeholder="Paste the whole fenced JSON block.">{{ pasted or "" }}</textarea>
+  </label>
+  <button type="submit">Record diagnosis</button>
+</form>

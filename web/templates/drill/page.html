@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ served.tag_slug }} &middot; studykernel{% endblock %}
+
+{% block content %}
+<p class="crumb">
+  <a href="/">Now</a> &rsaquo; <code>{{ served.tag_slug }}</code>
+  {% if served.routed_from %}<span class="routed">(routed from {{ served.routed_from }})</span>{% endif %}
+</p>
+
+<div class="drill">
+  {% if served.passage %}
+    {# Pinned. The passage stays put while the panel below moves through the
+       phases -- WEB_UI.md §5.2. A terminal cannot do this and it is one of
+       the four reasons this UI exists. #}
+    <aside class="passage">
+      <h2>Passage</h2>
+      <div class="passage-text">{{ served.passage }}</div>
+    </aside>
+  {% endif %}
+
+  <div class="item">
+    <div class="stem">{{ served.stem }}</div>
+    {% if served.choices %}
+      <ol class="choices" type="A">
+        {% for choice in served.choices %}<li>{{ choice }}</li>{% endfor %}
+      </ol>
+    {% endif %}
+
+    <div id="rungs" class="rungs">
+      {% for rung in view.rungs_shown %}
+        {% include "drill/_rung_body.html" %}
+      {% endfor %}
+    </div>
+
+    {% set shown = view.rungs_shown|map(attribute='level')|list %}
+    {% set next_level = (shown|max + 1) if shown else 1 %}
+    <div id="hint-control">
+      {% if view.phase.value in ("presented", "captured") and next_level <= max_hint %}
+        <form hx-post="/drill/{{ token }}/hint" hx-target="#rungs" hx-swap="beforeend">
+          <input type="hidden" name="level" value="{{ next_level }}">
+          <button type="submit" class="ghost">Hint L{{ next_level }}</button>
+          <span class="note inline">each rung is recorded; it is the competence metric</span>
+        </form>
+      {% endif %}
+    </div>
+
+    <div id="panel">
+      {% include "drill/_" ~ view.phase.value ~ ".html" %}
+    </div>
+  </div>
+</div>
+
+<script src="/static/vendor/htmx.min.js"></script>
+{% endblock %}

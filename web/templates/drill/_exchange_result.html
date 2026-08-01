@@ -1,0 +1,21 @@
+{% if error %}
+  {# Inline and immediate -- the mismatch message names both ids, so a stale
+     tab reads as the cause rather than a mystery. WEB_UI.md §4.5. #}
+  <p class="error">{{ error }}</p>
+  {% include "drill/_exchange_form.html" %}
+{% else %}
+  <div class="diagnosis">
+    <p><strong>{{ diagnosis.error_code }}</strong></p>
+    <p class="one-fix">{{ diagnosis.one_fix }}</p>
+    {% if diagnosis.prerequisite_gaps %}
+      <p class="note">prerequisite gaps: {{ diagnosis.prerequisite_gaps|join(", ") }}</p>
+    {% endif %}
+    {% if diagnosis.disputed_key %}
+      <p class="note">Item flagged <code>disputed_key</code> — it lands in the review queue.</p>
+    {% endif %}
+    {% if diagnosis.explain_back_ok is false %}
+      <p class="note">Explain-back rejected — the attempt stays unresolved.</p>
+    {% endif %}
+    <p><a href="/">What next</a></p>
+  </div>
+{% endif %}

@@ -24,7 +24,8 @@ kernel/          installable package; contains no exam names (CI-enforced)
   cli.py         the terminal adapter
 web/             the local web adapter (FastAPI); same purity rule as kernel/
   app.py         routes + the single-worker entry point
-  templates/     Jinja2; static/ holds one CSS file (KaTeX will live here)
+  templates/     Jinja2, drill/ holds the three phases as partials
+  static/        one CSS file + vendored htmx (KaTeX will live here)
 products/
   tsi-ready/     Product 1: threshold objective, seeded taxonomy
   gre-forge/     Product 2 sketch: deadline(maximize), learned DAG
@@ -91,13 +92,19 @@ python3 -m pip install -e '.[web]' --no-build-isolation
 STUDY_PRODUCT=products/tsi-ready study-web        # http://127.0.0.1:8000
 ```
 
-What works: the **Now** page — what to work on right now, why (gradient,
-learnability, availability, shown separately because they fail differently),
-and your position per route. It has three states, and the one that matters is
-*satisfied*: a full-page stop with the start control removed, not disabled.
-Plus profile switching. The drill and report pages are still WEB_UI.md
-phase 1, so `Now` currently hands you a `study drill --tag …` command rather
-than a button.
+**Now** answers one question — what to work on, and why (gradient,
+learnability and availability shown separately, because they fail
+differently). Three states, and the one that matters is *satisfied*: a
+full-page stop with the start control removed, not disabled.
+
+**Drill** runs the whole loop in the browser: passage pinned beside the item,
+blind capture, hint rungs one request at a time, server-side grading, the
+explain-back gate, then the briefing and paste-back panel with inline
+validation. Phase lives on the server, so refreshing redraws where you are
+instead of replaying a step.
+
+Still missing: bundled KaTeX, so LaTeX-heavy math items render as source; and
+the `Report` page. Both are WEB_UI.md phase 1.
 
 `study-web` runs a single uvicorn worker and there is no flag to change that.
 In-progress drills live in an in-process dict, so a second worker would fail
@@ -142,9 +149,10 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 
 ## Status
 
-v0 scaffold. The loop runs end to end on ~8,200 imported items, 129 tests
-pass, the drill loop lives in `kernel/session.py`, and the web UI has its
-`Now` page and profile switching ([WEB_UI.md](WEB_UI.md)).
+v0 scaffold. The loop runs end to end on ~8,200 imported items in both the
+terminal and the browser, 152 tests pass, and the drill loop lives in
+`kernel/session.py` with both front ends as adapters over it
+([WEB_UI.md](WEB_UI.md)).
 
 Current focus is math and ELAR multiple choice; the essay loop is deferred.
 What is not built: FSRS retention, learned-edge accrual, batch labeling and

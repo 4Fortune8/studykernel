@@ -139,3 +139,81 @@ td.meter .fill {
   background: var(--accent);
   min-width: 1px;
 }
+
+button.start { font-size: 1.05rem; padding: 0.5rem 1.6rem; }
+
+/* ---------------------------------------------------------------- drill */
+
+.crumb { color: var(--muted); font-size: 0.9rem; margin-top: 0; }
+
+/* Passage pinned beside the item, not above it. The whole reason a browser
+   beats the terminal on reading items -- WEB_UI.md §5.2. */
+.drill { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+@media (min-width: 60rem) {
+  .drill:has(.passage) { grid-template-columns: 1fr 1fr; align-items: start; }
+  .passage { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
+}
+
+.passage h2 { margin-top: 0; }
+.passage-text { white-space: pre-wrap; color: var(--fg); font-size: 0.95rem; }
+
+.stem { font-size: 1.1rem; margin-bottom: 1rem; white-space: pre-wrap; }
+.choices { padding-left: 1.4rem; }
+.choices li { margin: 0.3rem 0; }
+
+.rungs .rung {
+  border-left: 2px solid var(--accent);
+  padding: 0.1rem 0 0.1rem 0.9rem;
+  margin: 0.8rem 0;
+}
+.rung-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.rung p { margin: 0.2rem 0; }
+
+.phase { margin-top: 2rem; border-top: 1px solid var(--rule); padding-top: 1.5rem; }
+.phase h2 { margin-top: 0; }
+
+form.wide { max-width: none; }
+label.block { display: block; }
+label.block textarea, label.block input, label.block select {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+textarea { font: inherit; padding: 0.45rem 0.55rem; border: 1px solid var(--rule);
+           border-radius: 4px; background: var(--bg); color: var(--fg); resize: vertical; }
+select { font: inherit; padding: 0.35rem; border: 1px solid var(--rule);
+         border-radius: 4px; background: var(--bg); color: var(--fg); }
+
+button.ghost { border-color: var(--rule); color: var(--muted); }
+.note.inline { border: 0; padding: 0; font-size: 0.82rem; margin-left: 0.6rem; }
+
+.verdict.right { color: var(--accent); }
+.verdict.wrong { color: #b4472f; }
+@media (prefers-color-scheme: dark) { .verdict.wrong { color: #e8846a; } }
+
+.error {
+  color: #b4472f;
+  border-left: 2px solid currentColor;
+  padding-left: 0.9rem;
+}
+@media (prefers-color-scheme: dark) { .error { color: #e8846a; } }
+
+.briefing {
+  max-height: 22rem;
+  overflow: auto;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 0.9rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+.briefing-tools { margin-bottom: 0.5rem; }
+
+.diagnosis { border: 1px solid var(--accent); border-radius: 6px; padding: 1rem 1.2rem; }
+.one-fix { font-size: 1.05rem; }
