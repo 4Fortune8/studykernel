@@ -1,0 +1,59 @@
+# Threshold objective. DESIGN.md §12.
+#
+# VERIFY BEFORE RELYING ON THIS FILE: the essay cut varies by institution
+# (published values run 4 vs 5), and some institutions use finer-grained
+# placement bands beyond the binary, which turns this into a small ordered set
+# of thresholds. The plugin handles either; this config must match the actual
+# school. DESIGN.md §12 flags this explicitly and it is still unverified.
+
+objective:
+  type: threshold
+
+  # Cut plus current measurement uncertainty. Aiming at exactly the line is a
+  # coin flip on test day (DESIGN.md §7.1) -- the margin is the part people skip.
+  margin_policy: rating_deviation
+  margin_multiplier: 1.0
+
+  # How the kernel derives the scalars the routes below refer to. The kernel
+  # knows the *kinds*; this file supplies the meaning.
+  variables:
+    crc_estimate:
+      kind: scaled_ability
+      section: math
+      # Placeholder mapping. Anchored against official sample items once ~40
+      # of them are hand-entered (DATA_SOURCING_MATH.md §6) -- until then the
+      # scale is a guess and P(pass) should be read as ordinal, not absolute.
+      rating_range: [1200, 1750]
+      scale_range: [910, 990]
+    elar_crc_estimate:
+      kind: scaled_ability
+      section: elar
+      rating_range: [1200, 1750]
+      scale_range: [910, 990]
+    essay_score:
+      # Learner-reported from a scored practice essay: `study set essay_score 5`.
+      kind: manual
+      default: 0
+
+  # Per-domain values for all_domains(...). Domains are the parentless math
+  # tags; every tag beneath one belongs to it.
+  domains:
+    source: top_level_tags
+    section: math
+    variables:
+      diagnostic_level:
+        kind: achieved_level
+        mastery_bar: 0.80
+
+  # Groups are separate requirements (both must hold); routes inside a group
+  # are alternatives. A learner with deep algebra and hollow geometry is
+  # closer via the no-holes route than via raw ability. DESIGN.md §7.1.
+  routes:
+    math:
+      - "crc_estimate >= 950"
+      - "all_domains(diagnostic_level >= 6)"
+    elar:
+      # The essay is a gate, not a polish step: a learner can be excellent on
+      # multiple choice and fail ELAR on the essay alone.
+      # DATA_SOURCING_ELAR.md §4.4.
+      - "elar_crc_estimate >= 945 AND essay_score >= 5"

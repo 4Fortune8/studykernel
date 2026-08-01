@@ -1,0 +1,260 @@
+# TSIA2 mathematics taxonomy: four domains x diagnostic levels 1-6.
+#
+# This is why TSIA2 was chosen as Product 1 (DESIGN.md §11): the published
+# taxonomy means the prerequisite DAG arrives pre-seeded at confidence 1.0,
+# removing the cold-start problem the GRE product structurally has.
+#
+# Coverage weights are flat across the four domains. With ~5 math items per
+# domain, no narrow topic repays deep specialization -- breadth dominates
+# depth, the opposite of GRE quant tuning. DESIGN.md §13.3.
+
+tags:
+  - slug: quantitative-reasoning
+    display_name: "Quantitative Reasoning"
+    section: math
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l1
+    display_name: "Quantitative Reasoning L1: whole-number operations and place value"
+    section: math
+    parent: quantitative-reasoning
+    level: 1
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l2
+    display_name: "Quantitative Reasoning L2: fractions, decimals, and percentages"
+    section: math
+    parent: quantitative-reasoning
+    level: 2
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l3
+    display_name: "Quantitative Reasoning L3: ratios, rates, and proportional reasoning"
+    section: math
+    parent: quantitative-reasoning
+    level: 3
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l4
+    display_name: "Quantitative Reasoning L4: unit conversion and measurement"
+    section: math
+    parent: quantitative-reasoning
+    level: 4
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l5
+    display_name: "Quantitative Reasoning L5: multi-step word problems"
+    section: math
+    parent: quantitative-reasoning
+    level: 5
+    coverage_weight: 1.0
+  - slug: quantitative-reasoning-l6
+    display_name: "Quantitative Reasoning L6: modeling with quantities and estimation"
+    section: math
+    parent: quantitative-reasoning
+    level: 6
+    coverage_weight: 1.0
+
+  - slug: algebraic-reasoning
+    display_name: "Algebraic Reasoning"
+    section: math
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l1
+    display_name: "Algebraic Reasoning L1: variables, expressions, and evaluation"
+    section: math
+    parent: algebraic-reasoning
+    level: 1
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l2
+    display_name: "Algebraic Reasoning L2: linear equations in one variable"
+    section: math
+    parent: algebraic-reasoning
+    level: 2
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l3
+    display_name: "Algebraic Reasoning L3: linear systems, inequalities, and graphing"
+    section: math
+    parent: algebraic-reasoning
+    level: 3
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l4
+    display_name: "Algebraic Reasoning L4: polynomials, factoring, and exponents"
+    section: math
+    parent: algebraic-reasoning
+    level: 4
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l5
+    display_name: "Algebraic Reasoning L5: quadratics and rational expressions"
+    section: math
+    parent: algebraic-reasoning
+    level: 5
+    coverage_weight: 1.0
+  - slug: algebraic-reasoning-l6
+    display_name: "Algebraic Reasoning L6: functions, radicals, and non-linear models"
+    section: math
+    parent: algebraic-reasoning
+    level: 6
+    coverage_weight: 1.0
+
+  - slug: geometric-spatial-reasoning
+    display_name: "Geometric and Spatial Reasoning"
+    section: math
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l1
+    display_name: "Geometric and Spatial Reasoning L1: plane figures and their properties"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 1
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l2
+    display_name: "Geometric and Spatial Reasoning L2: perimeter, area, and circumference"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 2
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l3
+    display_name: "Geometric and Spatial Reasoning L3: surface area and volume"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 3
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l4
+    display_name: "Geometric and Spatial Reasoning L4: the coordinate plane, distance, and slope"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 4
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l5
+    display_name: "Geometric and Spatial Reasoning L5: similarity, congruence, and the Pythagorean theorem"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 5
+    coverage_weight: 1.0
+  - slug: geometric-spatial-reasoning-l6
+    display_name: "Geometric and Spatial Reasoning L6: transformations and coordinate geometry proofs"
+    section: math
+    parent: geometric-spatial-reasoning
+    level: 6
+    coverage_weight: 1.0
+
+  - slug: probabilistic-statistical-reasoning
+    display_name: "Probabilistic and Statistical Reasoning"
+    section: math
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l1
+    display_name: "Probabilistic and Statistical Reasoning L1: reading tables, plots, and graphs"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 1
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l2
+    display_name: "Probabilistic and Statistical Reasoning L2: measures of center and spread"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 2
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l3
+    display_name: "Probabilistic and Statistical Reasoning L3: simple probability and sample spaces"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 3
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l4
+    display_name: "Probabilistic and Statistical Reasoning L4: compound and conditional probability"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 4
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l5
+    display_name: "Probabilistic and Statistical Reasoning L5: distributions, correlation, and lines of best fit"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 5
+    coverage_weight: 1.0
+  - slug: probabilistic-statistical-reasoning-l6
+    display_name: "Probabilistic and Statistical Reasoning L6: sampling, inference, and study design"
+    section: math
+    parent: probabilistic-statistical-reasoning
+    level: 6
+    coverage_weight: 1.0
+
+# Seed edges: within a domain, each diagnostic level is a prerequisite for
+# the next. Confidence 1.0 -- these come from the published taxonomy, not
+# from inference, and the DAG's provenance rule keeps learned edges from
+# ever reaching this confidence (kernel/pedagogy/dag.py).
+edges:
+  - parent: quantitative-reasoning-l1
+    child: quantitative-reasoning-l2
+    confidence: 1.0
+    source: seed
+  - parent: quantitative-reasoning-l2
+    child: quantitative-reasoning-l3
+    confidence: 1.0
+    source: seed
+  - parent: quantitative-reasoning-l3
+    child: quantitative-reasoning-l4
+    confidence: 1.0
+    source: seed
+  - parent: quantitative-reasoning-l4
+    child: quantitative-reasoning-l5
+    confidence: 1.0
+    source: seed
+  - parent: quantitative-reasoning-l5
+    child: quantitative-reasoning-l6
+    confidence: 1.0
+    source: seed
+  - parent: algebraic-reasoning-l1
+    child: algebraic-reasoning-l2
+    confidence: 1.0
+    source: seed
+  - parent: algebraic-reasoning-l2
+    child: algebraic-reasoning-l3
+    confidence: 1.0
+    source: seed
+  - parent: algebraic-reasoning-l3
+    child: algebraic-reasoning-l4
+    confidence: 1.0
+    source: seed
+  - parent: algebraic-reasoning-l4
+    child: algebraic-reasoning-l5
+    confidence: 1.0
+    source: seed
+  - parent: algebraic-reasoning-l5
+    child: algebraic-reasoning-l6
+    confidence: 1.0
+    source: seed
+  - parent: geometric-spatial-reasoning-l1
+    child: geometric-spatial-reasoning-l2
+    confidence: 1.0
+    source: seed
+  - parent: geometric-spatial-reasoning-l2
+    child: geometric-spatial-reasoning-l3
+    confidence: 1.0
+    source: seed
+  - parent: geometric-spatial-reasoning-l3
+    child: geometric-spatial-reasoning-l4
+    confidence: 1.0
+    source: seed
+  - parent: geometric-spatial-reasoning-l4
+    child: geometric-spatial-reasoning-l5
+    confidence: 1.0
+    source: seed
+  - parent: geometric-spatial-reasoning-l5
+    child: geometric-spatial-reasoning-l6
+    confidence: 1.0
+    source: seed
+  - parent: probabilistic-statistical-reasoning-l1
+    child: probabilistic-statistical-reasoning-l2
+    confidence: 1.0
+    source: seed
+  - parent: probabilistic-statistical-reasoning-l2
+    child: probabilistic-statistical-reasoning-l3
+    confidence: 1.0
+    source: seed
+  - parent: probabilistic-statistical-reasoning-l3
+    child: probabilistic-statistical-reasoning-l4
+    confidence: 1.0
+    source: seed
+  - parent: probabilistic-statistical-reasoning-l4
+    child: probabilistic-statistical-reasoning-l5
+    confidence: 1.0
+    source: seed
+  - parent: probabilistic-statistical-reasoning-l5
+    child: probabilistic-statistical-reasoning-l6
+    confidence: 1.0
+    source: seed

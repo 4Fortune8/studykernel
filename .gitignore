@@ -1,0 +1,22 @@
+# User-supplied content and working data. DESIGN.md §14: content/ is never
+# version-controlled. DESIGN.md principle 8: content enters version control
+# only with a redistribution license.
+content/
+
+# Local study database and exports.
+*.db
+*.db-journal
+*.sqlite3
+exports/
+
+# Tier 0 official material is copyrighted; personal use only, never committed.
+**/packs/official/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/

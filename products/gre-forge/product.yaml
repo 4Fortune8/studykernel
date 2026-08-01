@@ -1,0 +1,61 @@
+# gre-forge -- Product 2, sketch. DESIGN.md Part V.
+#
+# Deferred to v2, but specified enough to prove the kernel seams. The test
+# this product exists to run: if building it requires kernel changes beyond a
+# new objective config and product pack, the kernel failed its design test.
+#
+# Content strategy differs completely from tsi-ready. All quality GRE material
+# is ETS or commercial, so nothing ships bundled -- importers only, and the
+# user supplies the content. This is exactly why TSI is Product 1 and the
+# public demo even though GRE is the personal objective (DESIGN.md §11).
+
+product_id: gre-forge
+display_name: "GRE score maximization"
+
+mastery_bar: 0.85
+
+sections:
+  quant:
+    display_name: "Quantitative Reasoning"
+    item_count: 27
+    explanation_policy: withheld
+    blueprint_weight: 1.0
+  verbal:
+    display_name: "Verbal Reasoning"
+    item_count: 27
+    # Fluent-but-false justifications teach false reasoning, so on reading
+    # comprehension the model is pinned to official text where it exists.
+    # DESIGN.md §10.
+    explanation_policy: pinned
+    blueprint_weight: 1.0
+
+capture:
+  fields:
+    # verification_method is deliberately OFF. Checking is not free under time
+    # pressure, so the field is meaningless here. DESIGN.md §5 -- this is the
+    # entry that proves capture fields are product config, not kernel constants.
+    - predicted_difficulty
+
+# The mirror image of tsi-ready. On a long timed exam a single careless slip
+# is noise-tier; the same code is weighted 2.0 for the untimed CAT. Same
+# kernel enum, opposite numbers -- which is the whole argument of DESIGN.md §5.
+error_code_weights:
+  execution_error: 0.8
+  misread: 1.0
+  knowledge_gap: 1.5
+  trigger_miss: 1.5
+  distractor_trap: 1.5
+  incomplete: 1.0
+  prerequisite_gap: 1.2
+  # On a timed section-adaptive exam this is the score ceiling, not an excuse.
+  time_pressure: 2.0
+  guess: 1.0
+  none: 0.0
+
+drill_modes:
+  hard_only:
+    description: "Surviving a whole hard second section is where 167+ lives"
+    implemented: false
+  two_pass:
+    description: "Skip-and-return is strictly correct: no wrong-answer penalty, free movement"
+    implemented: false

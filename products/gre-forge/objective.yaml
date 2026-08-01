@@ -1,0 +1,38 @@
+# deadline(maximize) -- DESIGN.md Part V.
+#
+# The composition is the point. `deadline` wraps rather than replaces, so
+# `maximize` never grows a days-remaining branch and calendar pressure lives
+# in exactly one place (DESIGN.md §7.4).
+#
+# Every point has value here, so unlike tsi-ready there is no natural stopping
+# rule -- `satisfied` is entirely target- and deadline-driven. A threshold
+# objective correctly abandons a satisfied domain; maximize must not, which is
+# why these stay separate plugins rather than one parameterized scorer
+# (DESIGN.md §7.5).
+
+objective:
+  type: deadline
+  # Placeholder. Set to the real test date before this product is used.
+  date: 2027-01-15
+
+  inner:
+    type: maximize
+
+    variables:
+      verbal_estimate:
+        kind: scaled_ability
+        section: verbal
+        rating_range: [1200, 1900]
+        scale_range: [130, 170]
+      quant_estimate:
+        kind: scaled_ability
+        section: quant
+        rating_range: [1200, 1900]
+        scale_range: [130, 170]
+
+    # Against a V155 / Q161 baseline.
+    targets:
+      verbal_estimate: 161
+      quant_estimate: 167
+
+    saturation_rating: 1850

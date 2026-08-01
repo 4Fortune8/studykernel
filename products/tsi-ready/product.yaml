@@ -1,0 +1,70 @@
+# tsi-ready -- Product 1. DESIGN.md Part IV.
+#
+# Configuration only. If this product needs kernel changes beyond a new
+# objective config and pack, the kernel was wrong (§14).
+
+product_id: tsi-ready
+display_name: "TSIA2 readiness"
+
+# Mastery bar for reliability lower bounds. DESIGN.md §6.2 / principle 5.
+mastery_bar: 0.80
+
+sections:
+  math:
+    display_name: "Mathematics CRC"
+    item_count: 20
+    # Model reasoning is dependable on quantitative material (DESIGN.md §10).
+    explanation_policy: withheld
+    blueprint_weight: 1.0
+  elar:
+    display_name: "English Language Arts and Reading CRC"
+    item_count: 30
+    # RC without official explanations. DATA_SOURCING_ELAR.md §2.4: justify
+    # only via verbatim passage quotes, and flag keys you cannot support.
+    explanation_policy: anchored
+    blueprint_weight: 1.0
+  essay:
+    display_name: "WritePlacer essay"
+    item_count: 1
+    explanation_policy: withheld
+    blueprint_weight: 1.0
+
+capture:
+  fields:
+    # ON for this product. An untimed exam makes checking free and therefore
+    # trainable, and this attacks the dominant error mode. DESIGN.md §13.1.
+    - verification_method
+
+# Product data, not kernel constants (DESIGN.md §5). Untimed inverts error
+# economics: checking is free, so careless errors are preventable, so they are
+# unacceptable rather than noise. These sit *above* what a harder timed exam
+# would use, because on an item-adaptive CAT an error costs the item plus
+# downward routing, with only ~20 items of runway. DESIGN.md §13.1.
+error_code_weights:
+  execution_error: 2.0
+  misread: 2.0
+  knowledge_gap: 1.0
+  trigger_miss: 1.2
+  distractor_trap: 1.3
+  incomplete: 1.5
+  prerequisite_gap: 1.0
+  # Untimed. If this fires, something is wrong with the practice setup.
+  time_pressure: 0.2
+  guess: 1.0
+  none: 0.0
+
+drill_modes:
+  # DESIGN.md §13.4. Declared here; --ladder and --full-sitting are v1.
+  ladder:
+    description: "Climb difficulty until failure; measures the ceiling and its stability"
+    implemented: false
+  domain_focus:
+    description: "Restrict to one domain"
+    implemented: true
+  full_sitting:
+    description: "20 math + 30 ELAR + essay in one block; stamina, not the clock"
+    implemented: false
+    # Datasourcing.md §6: the dress rehearsal must sound like the exam.
+    draws_from:
+      role: [anchor]
+      style: [native]

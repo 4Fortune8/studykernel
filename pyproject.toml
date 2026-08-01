@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "studykernel"
+version = "0.1.0.dev0"
+description = "A learning kernel: model the learner, define the goal, allocate effort by gradient."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# The kernel itself is deliberately dependency-light: stdlib plus a YAML
+# parser for pack loading. Anything heavier belongs to ingest.
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+# Importers only. The study loop never needs these.
+ingest = ["pyarrow>=14.0", "pandas>=2.0"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+study = "kernel.cli:main"
+
+[tool.setuptools]
+packages = [
+    "kernel",
+    "kernel.state",
+    "kernel.objectives",
+    "kernel.pedagogy",
+    "kernel.exchange",
+    "kernel.storage",
+    "kernel.analytics",
+]
+
+[tool.setuptools.package-data]
+"kernel.storage" = ["*.sql"]
+"kernel.exchange" = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

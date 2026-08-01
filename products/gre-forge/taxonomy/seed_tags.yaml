@@ -1,0 +1,37 @@
+# Thin seed. DESIGN.md Part V: the prerequisite DAG here is **learned**, not
+# seeded -- no official taxonomy exists to seed from.
+#
+# This is the structural contrast with tsi-ready, whose 28 tags and 20 seed
+# edges arrive from a published taxonomy at confidence 1.0. Here `edges:` is
+# empty on purpose and stays that way: edges accrue from diagnosis
+# `prerequisite_gaps`, capped below seed confidence, and only from label
+# sources the provenance gate admits (kernel/pedagogy/dag.py).
+
+tags:
+  - slug: arithmetic
+    display_name: "Arithmetic and number properties"
+    section: quant
+  - slug: algebra
+    display_name: "Algebra"
+    section: quant
+  - slug: geometry
+    display_name: "Geometry"
+    section: quant
+  - slug: data-analysis
+    display_name: "Data analysis, statistics, probability"
+    section: quant
+  - slug: word-problems
+    display_name: "Word problems and modeling"
+    section: quant
+
+  - slug: reading-comprehension
+    display_name: "Reading comprehension"
+    section: verbal
+  - slug: text-completion
+    display_name: "Text completion"
+    section: verbal
+  - slug: sentence-equivalence
+    display_name: "Sentence equivalence"
+    section: verbal
+
+edges: []

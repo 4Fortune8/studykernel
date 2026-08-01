@@ -1,0 +1,105 @@
+# TSIA2 ELAR taxonomy. DATA_SOURCING_ELAR.md §1.
+#
+# Note the shape difference from math: no diagnostic levels, because ELAR has
+# no published level structure to seed from. Reliability carries the whole
+# weight of the mastery judgment here.
+#
+# The `sentence-revision` children are exactly the transformation library of
+# the injection generator (DATA_SOURCING_ELAR.md §3) -- **the tag is the
+# transformation**, which is what makes generated items arrive labeled for
+# free, and what makes this the one tag family whose supply can never starve.
+#
+# Roughly half the 30-item ELAR CRC is writing/revision. The universal failure
+# pattern is over-preparing reading (practice is abundant) and under-preparing
+# revision (it isn't), so the weights below deliberately do not follow how
+# easy the items are to source.
+
+tags:
+  - slug: literary-analysis
+    display_name: "Literary text analysis: theme, tone, characterization, figurative language"
+    section: elar
+    coverage_weight: 1.0
+
+  - slug: informational-analysis
+    display_name: "Informational text: main idea, inference, author's purpose, evidence"
+    section: elar
+    coverage_weight: 1.0
+
+  - slug: synthesis-two-sources
+    display_name: "Cross-passage synthesis"
+    section: elar
+    # Supplied by official samples only; will read as supply-constrained in
+    # the availability report. That is correct behavior, not a bug to paper
+    # over. DATA_SOURCING_ELAR.md §2.1.
+    coverage_weight: 0.6
+
+  - slug: sentence-revision
+    display_name: "Sentence revision, editing, and completion"
+    section: elar
+    coverage_weight: 1.2
+
+  - slug: sv-agreement
+    display_name: "Subject-verb agreement"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: verb-tense
+    display_name: "Verb tense consistency"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: comma-splice
+    display_name: "Comma splices"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: fragment
+    display_name: "Sentence fragments"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: run-on
+    display_name: "Run-on sentences"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: pronoun-antecedent
+    display_name: "Pronoun-antecedent agreement"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: apostrophe-possessive
+    display_name: "Apostrophes and possessives"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: dangling-modifier
+    display_name: "Dangling and misplaced modifiers"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: parallel-structure
+    display_name: "Parallel structure"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+  - slug: word-choice-homophone
+    display_name: "Word choice and homophones"
+    section: elar
+    parent: sentence-revision
+    coverage_weight: 1.0
+
+  - slug: essay-revision
+    display_name: "Rhetorical revision: transitions, ordering, unity"
+    section: elar
+    # Not rule-generable -- these judgments aren't deterministic
+    # transformations. Official and packet items only.
+    # DATA_SOURCING_ELAR.md §3.5.
+    coverage_weight: 1.0
+
+  - slug: essay-writing
+    display_name: "WritePlacer essay"
+    section: essay
+    coverage_weight: 1.0
+
+edges: []
