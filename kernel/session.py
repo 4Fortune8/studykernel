@@ -100,6 +100,10 @@ class Starved:
 
     reason: str
     tag_slug: str | None = None
+    # Set when the emptiness is an artefact of a subject filter rather than of
+    # the corpus, so a front end can offer to widen the scope instead of
+    # implying there is nothing to study anywhere.
+    section: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,7 @@ class Recommendation:
     """
 
     tag_slug: str
+    section: str | None
     routed_from: str | None
     priority: float
     gradient: float
@@ -321,7 +326,45 @@ class DrillSession:
         state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
         return objective_base.build(self.product["objective"]).report(state)
 
-    def recommend(self, tag: str | None = None) -> Recommendation | Satisfied | Starved:
+    def _ranked(self, section: str | None):
+        """(state, objective, servable allocations). Shared by the callers below."""
+        state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
+        objective = objective_base.build(self.product["objective"])
+        edges = db.load_edges(self.conn, self.product["product_id"])
+        ranked = [
+            a
+            for a in allocator.rank(state, objective, edges, limit=RANK_LIMIT)
+            if a.priority > 0
+        ]
+        if section is not None:
+            known = set(self.product.get("sections") or {})
+            if section not in known:
+                raise ValueError(f"unknown section {section!r}; product has {sorted(known)}")
+        return state, objective, ranked
+
+    @staticmethod
+    def _in_section(alloc, state, section: str | None) -> bool:
+        tag = state.tags.get(alloc.tag_slug)
+        return section is None or (tag is not None and tag.section == section)
+
+    def servable_by_section(self) -> dict[str, int]:
+        """How many tags each section can currently serve.
+
+        So a subject picker can show what is actually behind each option
+        instead of offering a dead click. A section absent from the result has
+        nothing servable right now.
+        """
+        state, _, ranked = self._ranked(None)
+        counts: dict[str, int] = {}
+        for alloc in ranked:
+            tag = state.tags.get(alloc.tag_slug)
+            if tag is not None:
+                counts[tag.section] = counts.get(tag.section, 0) + 1
+        return counts
+
+    def recommend(
+        self, tag: str | None = None, section: str | None = None
+    ) -> Recommendation | Satisfied | Starved:
         """Decide what to work on, without reserving an item for it.
 
         Split out of `start()` because a home page has to ask *what should I
@@ -329,28 +372,52 @@ class DrillSession:
         commitment, and asking it on every page load would churn item
         selection and mint tokens nobody uses. `start()` is this plus the
         commitment.
+
+        `section` is the domain-focus drill mode (DESIGN.md §13.4), and it is
+        a narrower thing than letting the learner pick the item. Choosing to
+        spend the next half hour on one subject is a scheduling decision only
+        the learner can make; choosing *which tag within it* is the
+        allocator's whole job, and it still does that. WEB_UI.md §9 Q3 argues
+        against offering a menu of tags for exactly that reason, and this is
+        not one.
+
+        A satisfied objective ignores the filter entirely: focusing on a
+        subject must never be a way to keep the tool from saying stop.
         """
-        state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
-        objective = objective_base.build(self.product["objective"])
+        state, objective, ranked = self._ranked(section)
         if objective.satisfied(state):
             return Satisfied()
 
-        edges = db.load_edges(self.conn, self.product["product_id"])
-        ranked = [
-            a
-            for a in allocator.rank(state, objective, edges, limit=RANK_LIMIT)
-            if a.priority > 0
-        ]
+        in_scope = [a for a in ranked if self._in_section(a, state, section)]
         if tag:
-            ranked = [a for a in ranked if a.tag_slug == tag]
-        if not ranked:
+            in_scope = [a for a in in_scope if a.tag_slug == tag]
+
+        if not in_scope:
+            if section and ranked:
+                elsewhere = sorted(
+                    {
+                        state.tags[a.tag_slug].section
+                        for a in ranked
+                        if a.tag_slug in state.tags
+                    }
+                )
+                return Starved(
+                    f"Nothing servable in {section}. Other subjects still have work: "
+                    + ", ".join(elsewhere),
+                    tag_slug=tag,
+                    section=section,
+                )
             return Starved(
                 "Nothing servable. The report shows what the corpus is missing.",
                 tag_slug=tag,
+                section=section,
             )
 
-        alloc = ranked[0]
+        alloc = in_scope[0]
         return Recommendation(
+            section=state.tags[alloc.tag_slug].section
+            if alloc.tag_slug in state.tags
+            else None,
             tag_slug=alloc.tag_slug,
             routed_from=alloc.routed_from,
             priority=alloc.priority,
@@ -362,9 +429,11 @@ class DrillSession:
             reasons=list(alloc.reasons),
         )
 
-    def start(self, tag: str | None = None) -> Served | Satisfied | Starved:
+    def start(
+        self, tag: str | None = None, section: str | None = None
+    ) -> Served | Satisfied | Starved:
         """Pick what to work on and serve it, key withheld."""
-        choice = self.recommend(tag)
+        choice = self.recommend(tag, section)
         if not isinstance(choice, Recommendation):
             return choice
 

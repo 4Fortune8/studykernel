@@ -121,7 +121,7 @@ def cmd_drill(args: argparse.Namespace) -> int:
     product, conn = _load(args)
     drill = session.DrillSession(conn, product, args.learner)
 
-    served = drill.start(tag=args.tag)
+    served = drill.start(tag=args.tag, section=args.section)
     if isinstance(served, session.Satisfied):
         print(served.message)
         return 0
@@ -328,6 +328,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_drill = sub.add_parser("drill", help="run one item through the loop")
     p_drill.add_argument("--tag", help="force a tag instead of taking the top-ranked")
+    p_drill.add_argument(
+        "--section",
+        help="restrict to one subject; the allocator still picks the tag within it",
+    )
     p_drill.add_argument("--briefing-out", default="briefing.txt")
 
     p_record = sub.add_parser("record", help="record a returned diagnosis")

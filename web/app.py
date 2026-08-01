@@ -151,12 +151,16 @@ async def add_profile(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request) -> HTMLResponse:
+async def home(request: Request, section: str | None = None) -> HTMLResponse:
     """`Now`. WEB_UI.md §5.1: one question, three states.
 
     The satisfied state is a full-page stop with no way to start, per §6 --
     removed, not disabled. A study tool that cannot say *stop* is an
     engagement product, and this is the page where that gets decided.
+
+    `?section=` chooses a subject and sticks, because "I am doing maths this
+    evening" should survive finishing an item. `?section=` with no value
+    clears it back to everything.
     """
     conn = deps.connect()
     try:
@@ -165,10 +169,18 @@ async def home(request: Request) -> HTMLResponse:
             return RedirectResponse("/profiles", status_code=303)
 
         product = deps.load_product()
-        drill = session.DrillSession(conn, product, learner)
-        choice = drill.recommend()
+        sections = product.get("sections") or {}
 
-        return templates.TemplateResponse(
+        if section is None:
+            chosen = deps.active_subject(request.cookies, product)
+        else:
+            chosen = section if section in sections else None
+
+        drill = session.DrillSession(conn, product, learner)
+        choice = drill.recommend(section=chosen)
+        satisfied = isinstance(choice, session.Satisfied)
+
+        response = templates.TemplateResponse(
             request=request,
             name="now.html",
             context={
@@ -176,13 +188,26 @@ async def home(request: Request) -> HTMLResponse:
                 "learner": learner,
                 "product_dir": deps.product_dir(),
                 "choice": choice,
-                "satisfied": isinstance(choice, session.Satisfied),
+                "satisfied": satisfied,
                 "starved": isinstance(choice, session.Starved),
                 # Position is not shown on a satisfied page: the answer there
                 # is "stop", and a progress readout invites one more session.
-                "position": None if isinstance(choice, session.Satisfied) else drill.position(),
+                "position": None if satisfied else drill.position(),
+                # Nor is the subject picker: on a met objective there is no
+                # subject worth choosing, and offering one is an invitation.
+                "sections": {} if satisfied else sections,
+                "servable": {} if satisfied else drill.servable_by_section(),
+                "chosen": chosen,
             },
         )
+        if section is not None:
+            if chosen:
+                response.set_cookie(
+                    deps.SUBJECT_COOKIE, chosen, samesite="lax", max_age=31536000
+                )
+            else:
+                response.delete_cookie(deps.SUBJECT_COOKIE)
+        return response
     finally:
         conn.close()
 
@@ -214,13 +239,16 @@ def _panel(request: Request, drill: session.DrillSession, token: str, **extra):
 
 
 @app.post("/drill/start")
-async def drill_start(request: Request, tag: str = Form("")) -> RedirectResponse:
+async def drill_start(
+    request: Request, tag: str = Form(""), section: str = Form("")
+) -> RedirectResponse:
     conn = deps.connect()
     try:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
-        served = drill.start(tag=tag or None)
+        scope = section if section in (drill.product.get("sections") or {}) else None
+        served = drill.start(tag=tag or None, section=scope)
         if not isinstance(served, session.Served):
             # Satisfied or starved -- `Now` is the page that says so properly.
             return RedirectResponse("/", status_code=303)

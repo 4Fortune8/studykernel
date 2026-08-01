@@ -461,6 +461,107 @@ def test_a_met_objective_recommends_nothing(tmp_path, conn, pack):
     assert isinstance(drill.start(), session.Satisfied)
 
 
+TWO_SECTION_PRODUCT_YAML = """
+product_id: practice-pack
+display_name: "A pack with two subjects"
+mastery_bar: 0.80
+sections:
+  quant:
+    display_name: "Quantitative"
+    item_count: 20
+    explanation_policy: withheld
+    blueprint_weight: 1.0
+  verbal:
+    display_name: "Verbal"
+    item_count: 20
+    explanation_policy: withheld
+    blueprint_weight: 1.0
+capture:
+  fields:
+    - verification_method
+error_code_weights:
+  execution_error: 2.0
+  knowledge_gap: 1.0
+  none: 0.0
+"""
+
+TWO_SECTION_TAGS_YAML = """
+tags:
+  - slug: fractions
+    display_name: "Fractions"
+    section: quant
+  - slug: inference
+    display_name: "Inference"
+    section: verbal
+edges: []
+"""
+
+
+@pytest.fixture
+def two_subject(tmp_path, conn, pack):
+    """The same database, re-read through a pack that declares two sections.
+
+    Only `quant` has items -- `inference` is declared and empty, which is the
+    ordinary state of a real pack and the case a subject picker has to handle
+    without offering a dead click.
+    """
+    (tmp_path / "product.yaml").write_text(TWO_SECTION_PRODUCT_YAML)
+    (tmp_path / "taxonomy" / "tags.yaml").write_text(TWO_SECTION_TAGS_YAML)
+    product = config.load_product(tmp_path)
+    db.upsert_taxonomy(conn, product["product_id"], product["_tags"], product["_edges"])
+    return session.DrillSession(conn, product, "learner", store=session.DrillStore())
+
+
+def test_a_subject_filter_restricts_the_recommendation(two_subject):
+    everything = two_subject.recommend()
+    focused = two_subject.recommend(section="quant")
+    assert isinstance(focused, session.Recommendation)
+    assert focused.section == "quant"
+    assert focused.tag_slug == everything.tag_slug
+
+
+def test_a_subject_with_no_items_says_so_and_points_elsewhere(two_subject):
+    """Not "nothing to study" -- that would be false and discouraging."""
+    result = two_subject.recommend(section="verbal")
+    assert isinstance(result, session.Starved)
+    assert result.section == "verbal"
+    assert "quant" in result.reason
+
+
+def test_servable_counts_are_reported_per_subject(two_subject):
+    counts = two_subject.servable_by_section()
+    assert counts.get("quant", 0) >= 1
+    assert "verbal" not in counts
+
+
+def test_an_unknown_subject_is_rejected_rather_than_silently_ignored(two_subject):
+    """Silently widening the scope would study the wrong thing without saying."""
+    with pytest.raises(ValueError, match="unknown section"):
+        two_subject.recommend(section="astrology")
+
+
+def test_starting_honours_the_subject(two_subject):
+    served = two_subject.start(section="quant")
+    assert isinstance(served, session.Served)
+    assert served.section_slug == "quant"
+
+
+def test_a_subject_filter_cannot_dodge_a_satisfied_objective(tmp_path, conn, pack):
+    """Principle 9 outranks the filter.
+
+    Otherwise "study only maths" becomes a way to keep a finished tool
+    serving items, which is the engagement product this design refuses to be.
+    """
+    (tmp_path / "objective.yaml").write_text(SATISFIED_OBJECTIVE_YAML)
+    met = config.load_product(tmp_path)
+    db.upsert_product(conn, met, "digest")
+    db.set_manual_value(conn, "learner", met["product_id"], "self_score", 9.0)
+
+    drill = session.DrillSession(conn, met, "learner", store=session.DrillStore())
+    assert isinstance(drill.recommend(section="quant"), session.Satisfied)
+    assert isinstance(drill.start(section="quant"), session.Satisfied)
+
+
 def test_position_is_read_only(drill, conn):
     """`study report` snapshots to objective_state; a page render must not.
 

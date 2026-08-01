@@ -380,6 +380,61 @@ def test_an_expired_token_is_a_page_not_a_traceback(client):
     assert "Nothing was recorded" in response.text
 
 
+# ------------------------------------------------------ subject focus
+
+
+def test_the_subject_picker_lists_the_products_sections(client):
+    page = client.get("/").text
+    assert "Quantitative" in page       # display_name from the pack, not a constant
+    assert "/?section=quant" in page
+    assert "/?section=" in page          # "everything"
+
+
+def chip_classes(html: str, href: str) -> str:
+    """The class attribute of the subject chip pointing at `href`.
+
+    Matched structurally rather than as a literal substring: the anchor spans
+    several lines, so a whitespace-sensitive assertion tests the template's
+    formatting instead of its behaviour.
+    """
+    match = re.search(
+        r'<a\s+class="([^"]*)"\s*\n?\s*href="' + re.escape(href) + r'"', html
+    )
+    return match.group(1) if match else ""
+
+
+def test_choosing_a_subject_sticks_across_requests(client):
+    client.get("/?section=quant")
+    assert client.cookies.get("studykernel_subject") == "quant"
+    # And is applied on the next visit, with no query param in sight.
+    page = client.get("/").text
+    assert "on" in chip_classes(page, "/?section=quant").split()
+    assert "on" not in chip_classes(page, "/?section=").split()
+
+
+def test_clearing_the_subject_goes_back_to_everything(client):
+    client.get("/?section=quant")
+    client.get("/?section=")
+    assert not client.cookies.get("studykernel_subject")
+
+
+def test_a_stale_subject_cookie_means_everything_not_a_crash(client):
+    """A pack that renames a section leaves cookies pointing at nothing.
+
+    The kernel rejects an unknown section outright, so the web layer has to
+    validate before passing it on -- otherwise an old cookie is a 500 on the
+    home page with no obvious cause.
+    """
+    client.cookies.set("studykernel_subject", "a-section-that-was-removed")
+    response = client.get("/")
+    assert response.status_code == 200
+
+
+def test_the_start_button_carries_the_subject(client):
+    page = client.get("/?section=quant").text
+    assert '<input type="hidden" name="section" value="quant">' in page
+
+
 # ------------------------------------- skipping the exchange, and history
 
 

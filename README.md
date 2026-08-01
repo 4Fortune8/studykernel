@@ -63,6 +63,7 @@ study init
 study ingest content/ingest/gsm8k.jsonl
 study report                              # position, routes, backlog
 study drill                               # one item through the loop
+study drill --section math                # one subject; allocator still picks
 study record <attempt_id>                 # paste the returned JSON block
 ```
 
@@ -97,6 +98,11 @@ STUDY_PRODUCT=products/tsi-ready study-web        # http://127.0.0.1:8000
 learnability and availability shown separately, because they fail
 differently). Three states, and the one that matters is *satisfied*: a
 full-page stop with the start control removed, not disabled.
+
+Pick a subject and it sticks — math only, reading only, or everything. You
+choose the subject; the allocator still chooses what within it. Sections come
+from the product pack, and one with nothing servable says so rather than
+offering a dead click.
 
 **Drill** runs the whole loop in the browser: passage pinned beside the item,
 blind capture, hint rungs one request at a time, server-side grading, the
@@ -177,7 +183,7 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 ## Status
 
 v0 scaffold. The loop runs end to end on ~8,200 imported items in both the
-terminal and the browser, 194 tests pass, and the drill loop lives in
+terminal and the browser, 205 tests pass, and the drill loop lives in
 `kernel/session.py` with both front ends as adapters over it
 ([WEB_UI.md](WEB_UI.md)).
 

@@ -425,6 +425,41 @@ from *a reader rejected the explain-back*, and ignores waived attempts.
 > `tests/test_storage.py` asserts the two views agree. **Any query mixing
 > old and new rows of a late-migrated column deserves this suspicion.**
 
+### Subject focus
+
+`Now` only ever offered the single global top tag, so a session spent on maths
+was not expressible. `recommend(section=…)` and `start(section=…)` restrict
+the ranking to one section; the picker on `Now` sticks in a cookie, and
+`study drill --section math` is the terminal equivalent.
+
+This implements `drill_modes.domain_focus`, which `products/tsi-ready` has
+declared as **`implemented: true`** since the scaffold and which nothing
+implemented. The pack is now telling the truth.
+
+**Why this is not the thing WEB_UI.md §9 Q3 argues against.** That question is
+about offering a *menu of tags*, which would "quietly reintroduce the
+learner's own priors — the thing the allocator exists to replace". Choosing a
+subject is a different decision: how to spend the next half hour is the
+learner's to make, and within the subject the allocator still picks the tag,
+the difficulty band and the item. Nobody is choosing to avoid a weak topic.
+
+Three properties worth keeping:
+
+1. **A satisfied objective ignores the filter.** Otherwise "study only maths"
+   becomes a way to keep a finished tool serving items, which is exactly the
+   engagement product principle 9 refuses. Tested.
+2. **An empty subject names the ones that are not.** "Nothing servable in
+   essay. Other subjects still have work: elar, math" — not "nothing to
+   study", which would be false and discouraging.
+3. **An unknown section raises** rather than silently widening the scope, so
+   a typo cannot quietly study the wrong subject. The web layer validates the
+   cookie against the pack first, so a section renamed in the pack degrades
+   to "everything" instead of a 500.
+
+Measured on the real corpus: everything → `informational-analysis`, math →
+`algebraic-reasoning-l4`, elar → `informational-analysis`, essay → starved
+with a pointer back. Drills started under a filter stay inside it.
+
 Next: the `Report` page, the last item in phase 1.
 
 ### Priority (2026-08-01)

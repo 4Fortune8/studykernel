@@ -3,6 +3,23 @@
 
 {% block content %}
 
+{% if sections %}
+  {# Domain focus, the drill mode the pack has always declared as implemented
+     (DESIGN.md §13.4). You choose the subject; the allocator still chooses
+     the tag within it, which is the part WEB_UI.md §9 Q3 protects. #}
+  <p class="filters subjects">
+    <span class="muted">Studying</span>
+    <a class="chip {% if not chosen %}on{% endif %}" href="/?section=">everything</a>
+    {% for slug, spec in sections.items() %}
+      {% set n = servable.get(slug, 0) %}
+      <a class="chip {% if chosen == slug %}on{% endif %} {% if not n %}empty{% endif %}"
+         href="/?section={{ slug }}"
+         title="{% if n %}{{ n }} tag(s) servable{% else %}nothing servable right now{% endif %}"
+         >{{ spec.get("display_name", slug) }}{% if not n %} <span class="muted">·&nbsp;0</span>{% endif %}</a>
+    {% endfor %}
+  </p>
+{% endif %}
+
 {% if satisfied %}
   {# WEB_UI.md §6: a full-page stop. No start control, no position readout,
      nothing below this to scroll to. Removed, not disabled. #}
@@ -17,13 +34,17 @@
   </section>
 
 {% elif starved %}
-  <h1>Nothing to serve</h1>
+  <h1>Nothing to serve{% if choice.section %} in this subject{% endif %}</h1>
   <p>{{ choice.reason }}</p>
-  <p class="note">
-    This is a corpus problem, not a you problem: the objective wants work you
-    have no items for. <code>study report</code> prints the acquisition
-    backlog, ordered by the objective — acquire down it, then stop.
-  </p>
+  {% if choice.section %}
+    <p><a class="chip on" href="/?section=">Study everything instead</a></p>
+  {% else %}
+    <p class="note">
+      This is a corpus problem, not a you problem: the objective wants work you
+      have no items for. <code>study report</code> prints the acquisition
+      backlog, ordered by the objective — acquire down it, then stop.
+    </p>
+  {% endif %}
 
 {% else %}
   <h1>{{ choice.tag_slug }}</h1>
@@ -36,10 +57,12 @@
 
   <form method="post" action="/drill/start" class="do">
     <input type="hidden" name="tag" value="{{ choice.tag_slug }}">
+    <input type="hidden" name="section" value="{{ chosen or '' }}">
     <button type="submit" class="start">Start</button>
   </form>
   <p class="note">
-    Or in the terminal: <code>study drill --tag {{ choice.tag_slug }}</code>
+    Or in the terminal:
+    <code>study drill{% if chosen %} --section {{ chosen }}{% else %} --tag {{ choice.tag_slug }}{% endif %}</code>
   </p>
 
   <h2>Why this</h2>

@@ -17,6 +17,7 @@ from kernel import config
 from kernel.storage import db
 
 PROFILE_COOKIE = "studykernel_profile"
+SUBJECT_COOKIE = "studykernel_subject"
 
 
 class NoProductConfigured(RuntimeError):
@@ -97,3 +98,15 @@ def active_learner(request_cookies: dict[str, str], conn: sqlite3.Connection) ->
     if not learner_id:
         return None
     return learner_id if db.get_profile(conn, learner_id) else None
+
+
+def active_subject(request_cookies: dict[str, str], product: dict[str, Any]) -> str | None:
+    """The chosen subject, or None for all of them.
+
+    Validated against the product every time rather than trusted: a pack that
+    renames or drops a section would otherwise leave a cookie pointing at
+    nothing, and the kernel rejects an unknown section outright. A stale
+    cookie should quietly mean "everything", not a 500.
+    """
+    chosen = request_cookies.get(SUBJECT_COOKIE)
+    return chosen if chosen in (product.get("sections") or {}) else None
