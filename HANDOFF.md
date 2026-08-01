@@ -186,17 +186,84 @@ hour, including `--product` defaulting to `products/tsi-ready`. It works.
 
 ## 6. The next thing to do
 
-**Extract `kernel/session.py`.** `cmd_drill` in `kernel/cli.py` is 126 lines
-of orchestration that any second front end needs verbatim. It should come out
-into a headless `DrillSession` service before a web UI exists, not after —
-see WEB_UI.md §2. The 76 existing tests passing unchanged is the proof the
-extraction was behavior-preserving.
+**`kernel/session.py` is extracted** (2026-08-01). `cmd_drill` is now ~60
+lines of prompting with no decisions in it, and both front ends will share
+`DrillSession`. The 76 existing tests pass unchanged — but note what that
+does *not* prove: none of them ever touched `cmd_drill`, so "unchanged" was
+always a weaker claim than it read. `tests/test_session.py` adds 28 tests that
+do cover the loop, and they are what will catch drift.
 
-It is independently worth doing: it tidies `cli.py` whether or not the web UI
-is ever built.
+Three things the service does that the CLI never did, each an invariant that
+used to live in control flow:
 
-After that, WEB_UI.md phase 1. Note its §4.1: the answer key must never be
-sent to the browser before capture is submitted — not hidden, *not sent*.
+- `Served` — the pre-answer view — **has no `answer_key` field**. WEB_UI.md
+  §4.1 is enforced by the type, not by remembering.
+- Phases advance in one order; out-of-order calls raise `PhaseError`.
+- `min_hint_level` is the highest rung actually served, floored by the
+  learner's self-report. The CLI still self-reports; a web front end serving
+  rungs one at a time gets a measurement for free (§4.2).
+
+Next: WEB_UI.md phase 1, then phase 2.
+
+### Priority (2026-08-01)
+
+**The essay is deferred. Math and ELAR multiple choice are the focus.** So
+WEB_UI.md phase 3 moves behind phase 2, and §5 above item 1 — the unverified
+essay cut — stops being urgent, because nothing depends on it until the essay
+loop is built.
+
+**This priority is currently blocked, and the block is not obvious.** The
+allocator will not serve a single English item while the essay is unscored:
+
+```
+$ study next --limit 40      # essay_score = 0
+  0.0001  algebraic-reasoning-l4
+  ... seven math tags, no ELAR tag at all
+```
+
+`informational-analysis` has **1,359 items sitting in band** and a gradient of
+exactly `0.00000000`. The corpus is not the problem; the objective is. The
+ELAR route is one expression —
+
+```yaml
+- "elar_crc_estimate >= 945 AND essay_score >= 5"
+```
+
+— and an AND multiplies, so with `essay_score = 0` the partial derivative with
+respect to ELAR ability is `P'(elar) × 0 = 0`. §4's per-route gradient fix
+addressed one zeroed **group** killing the others; it does not reach inside a
+route, where a zeroed **conjunct** does the same thing to its own partners.
+Same failure mode, one level down, and still live.
+
+Two ways out. The first was rejected: `study set essay_score 5` unblocks it
+immediately and is a lie unless a real scored practice essay exists, and it
+inflates P(pass), which is the one thing this tool is not allowed to do.
+
+**Taken instead: the essay is split into its own route group**, which is what
+§7.1 says groups are for — separate requirements, both of which must hold.
+`products/tsi-ready/objective.yaml` now reads:
+
+   ```yaml
+   elar:
+     - "elar_crc_estimate >= 945"
+   essay:
+     - "essay_score >= 5"
+   ```
+
+Measured before and after on the same database: **P(pass) is unchanged at
+0.0%**, the essay route still reads 0% and still blocks readiness, and
+`informational-analysis` returns to the top of the ranking. Only gradient
+attribution changes. The essay stays a gate; it stops also being a gag on the
+reading half.
+
+Note what this cost: a product-config change, no kernel change. That is the
+architecture working.
+
+**Still unfixed, and it will recur:** the kernel takes gradients per route but
+not per conjunct. Any future route of the form `A AND B` where B is an
+unmeasured manual variable will silently zero A's gradient the same way. The
+generalizable fix belongs in `kernel/objectives/threshold.py`; splitting the
+route is the local workaround, not the cure.
 
 ---
 

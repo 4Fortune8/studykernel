@@ -19,7 +19,9 @@ kernel/          installable package; contains no exam names (CI-enforced)
   allocator.py   priority = gradient x learnability x availability
   pedagogy/      hint ladder, capture, explain-back gate, prerequisite DAG
   exchange/      briefing out, structured record in (no API required)
+  session.py     the drill loop, headless; front ends are adapters over it
   storage/       SQLite, append-only activity log
+  cli.py         the terminal adapter
 products/
   tsi-ready/     Product 1: threshold objective, seeded taxonomy
   gre-forge/     Product 2 sketch: deadline(maximize), learned DAG
@@ -67,6 +69,12 @@ There is no API. The briefing goes to a file, tutoring happens in whatever
 chat client you like, and one structured JSON block comes back. `study record`
 rejects it on `item_id` mismatch, which is what makes that safe.
 
+The loop lives in `kernel/session.py`, not in the CLI. `DrillSession` owns the
+sequence and the invariants that go with it — the answer key is not in the
+pre-answer view at all, phases only advance in one order, and the explain-back
+gate has no skip path — so a second front end inherits them rather than
+reimplementing them. `cli.py` prompts and prints; it decides nothing.
+
 ## The rules this is built on
 
 1. **What to study is goal-optimized; how to study never is.** Objectives set
@@ -88,11 +96,22 @@ rejects it on `item_id` mismatch, which is what makes that safe.
 
 ## Status
 
-v0 scaffold. The loop runs end to end on ~8,200 imported items. What is not
-built: FSRS retention, learned-edge accrual, batch labeling and the gold set,
-the ELAR error-injection generator, the essay loop, `--ladder` and
-`--full-sitting`, and the `maximize` objective's fragility weighting. See
-DESIGN.md §16 for the v1/v2 milestones.
+v0 scaffold. The loop runs end to end on ~8,200 imported items, 104 tests
+pass, and the drill loop is extracted into `kernel/session.py` ahead of the
+local web UI ([WEB_UI.md](WEB_UI.md)).
+
+Current focus is math and ELAR multiple choice; the essay loop is deferred.
+What is not built: FSRS retention, learned-edge accrual, batch labeling and
+the gold set, the ELAR error-injection generator, the essay loop, `--ladder`
+and `--full-sitting`, and the `maximize` objective's fragility weighting. See
+DESIGN.md §16 for the v1/v2 milestones and [HANDOFF.md](HANDOFF.md) for what
+is unverified.
+
+Two numbers in `study report` are not yet trustworthy as absolutes: the
+`crc_estimate` scale mapping is an unanchored placeholder, so P(pass) is
+ordinal rather than absolute, and the essay cut is unverified against the
+actual target institution. Both are useful for ranking what to study next,
+which is what the tool is for.
 
 The failure mode this project is most exposed to is sixty hours of building
 and ten of studying. Corpus engineering is more fun than studying; so is

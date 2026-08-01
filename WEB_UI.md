@@ -300,8 +300,19 @@ than a commercial study app, and that is the design working, not failing.
 
 ## 7. Milestones
 
+**Priority call (2026-08-01):** the essay is **deferred**. Math and the ELAR
+multiple-choice items are the focus, so phase 3 moves behind phase 2 and the
+phase-2 reading work is the next thing after phase 1.
+
+It does, however, need a product-config change first. With `essay_score = 0`,
+the conjunct `elar_crc_estimate >= 945 AND essay_score >= 5` zeroes the
+gradient on every ELAR tag, so the allocator serves **no English items at
+all** despite 1,359 of them sitting in band. Splitting the essay into its own
+route group leaves P(pass) identical and restores ELAR allocation. See
+HANDOFF.md §6.
+
 **Phase 1 — parity plus the reason to exist.**
-- [ ] Extract `kernel/session.py`; all 76 existing tests pass unchanged
+- [x] Extract `kernel/session.py`; all 76 existing tests pass unchanged
 - [ ] FastAPI skeleton, `deps.py`, bundled KaTeX
 - [ ] `Now` page with all three states, satisfied state included from day one
 - [ ] Drill flow, three phases, with the §4.1 key-absence test in the suite
@@ -315,7 +326,7 @@ than a commercial study app, and that is the design working, not failing.
 - [ ] `Corpus` browser + review queue; `disputed_key` triage
 - [ ] Gold-set promotion
 
-**Phase 3 — the essay.**
+**Phase 3 — the essay. Deferred; see the priority call above.**
 - [ ] Draft surface, timer, autosave
 - [ ] Blind self-assessment gate
 - [ ] Rubric critique, per-dimension storage and trajectory
@@ -325,9 +336,10 @@ than a commercial study app, and that is the design working, not failing.
 - [ ] Variance trend per domain
 - [ ] CI-width visualization on the reliability table
 
-Phases 1 and 3 are the ones that unlock studying that cannot happen today.
-Phases 2 and 4 are pull-based: build them when the review queue or the report
-actually feels blind, not before.
+Phases 1 and 3 are the ones that unlock studying that cannot happen today —
+but phase 3 is deferred by the priority call above, which leaves phase 2 as
+the next thing that matters. Phase 4 stays pull-based: build it when the
+report actually feels blind, not before.
 
 ---
 

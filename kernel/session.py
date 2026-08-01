@@ -1,0 +1,484 @@
+"""The drill loop as a headless service. WEB_UI.md §2.
+
+`cmd_drill` used to hold this sequence -- pick a tag, pick an item, capture,
+grade, gate, brief, persist -- interleaved with `input()` and `print()`. Any
+second front end needs the identical sequence, and a copy of it would drift
+silently, because both copies would keep looking like they work.
+
+So the sequence lives here and both front ends are adapters over it. This
+module does no I/O beyond the database: it never reads stdin, never prints,
+never writes a file. A caller that needs the briefing on disk writes it.
+
+**The pedagogy invariants are enforced here, not by caller control flow**,
+which is the whole point of the extraction (WEB_UI.md §8 risk 2):
+
+- The pre-answer view is `Served`, which has no `answer_key` field at all.
+  The key cannot be handed over early by a template that asks for the wrong
+  variable, because there is nothing to ask for (§4.1).
+- Phases advance in one order. Grading before capture raises `PhaseError`
+  rather than quietly recording an unusable attempt.
+- The explain-back gate has no skip path, and nothing is persisted until it
+  passes. This module deliberately offers no flag to bypass it, exactly as
+  `pedagogy/explain_back` offers none.
+- `min_hint_level` is the *highest rung actually served*, floored by whatever
+  the learner reports. A front end that serves rungs one at a time gets a
+  measurement instead of a self-report (§4.2).
+
+Three deviations from the interface sketched in WEB_UI.md §2, each because
+the sketch does not survive contact with both callers:
+
+1. `start()` takes no learner or product -- they are constructor arguments, so
+   that a web request builds one session object and a CLI invocation builds
+   one, instead of threading the pair through every call.
+2. `briefing()` returns a `Briefing`, not a bare string. The caller needs the
+   `attempt_id` to tell the learner what to record, and the `prompt_version`
+   to display (§4.5).
+3. `record()` is keyed by `attempt_id`, not by token. In the CLI the exchange
+   happens in a *later process*, so no in-memory token survives to name it.
+   The attempt id is the durable handle, and it is what the briefing hands
+   back for that reason.
+"""
+
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+
+from kernel import allocator
+from kernel.exchange import briefing as briefing_mod
+from kernel.exchange import record as record_mod
+from kernel.objectives import base as objective_base
+from kernel.pedagogy import capture as capture_mod
+from kernel.pedagogy import explain_back, grading, hints
+from kernel.storage import db
+
+RANK_LIMIT = 25
+
+
+class Phase(str, Enum):
+    """One order, enforced. Every transition is a method on `DrillSession`."""
+
+    PRESENTED = "presented"
+    CAPTURED = "captured"
+    ANSWERED = "answered"
+    EXPLAINED = "explained"
+    BRIEFED = "briefed"
+
+
+class PhaseError(RuntimeError):
+    """Raised when a step is taken out of order."""
+
+
+class UnknownDrill(LookupError):
+    """Raised when a token names no live drill -- expired, or a stale tab."""
+
+
+# ------------------------------------------------------------------ results
+
+
+@dataclass(frozen=True)
+class Satisfied:
+    """The objective is met with margin. DESIGN.md principle 9: stop studying.
+
+    A distinct type rather than an empty `Served`, so a front end cannot
+    render a start button by forgetting to check a boolean.
+    """
+
+    message: str = "Objective satisfied with margin. Stop studying."
+
+
+@dataclass(frozen=True)
+class Starved:
+    """Nothing servable. The corpus, not the learner, is the blocker."""
+
+    reason: str
+    tag_slug: str | None = None
+
+
+@dataclass(frozen=True)
+class Served:
+    """Everything the learner may see *before* answering.
+
+    There is no `answer_key` field and there must never be one. This type is
+    what a template renders in phase 1, so the key is absent from the page by
+    construction rather than by remembering to leave it out (WEB_UI.md §4.1).
+    """
+
+    token: str
+    item_id: str
+    tag_slug: str
+    routed_from: str | None
+    stem: str
+    choices: list[str] | None
+    passage: str | None
+    section_slug: str
+    target_band: tuple[float, float]
+    capture_fields: list[str]
+    max_hint_level: int = hints.MAX_LEVEL
+
+
+@dataclass(frozen=True)
+class Accepted:
+    """A capture that passed validation and is now fixed for this attempt."""
+
+    token: str
+    fields: list[str]
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """The first moment the key is allowed out."""
+
+    correct: bool
+    answer_key: str
+    answer_given: str
+    min_hint_level: int
+    competence: float
+
+
+@dataclass(frozen=True)
+class Briefing:
+    text: str
+    attempt_id: int
+    prompt_version: str
+    item_id: str
+
+
+# ------------------------------------------------------- in-progress state
+
+
+@dataclass
+class _Drill:
+    """Server-side state for one item in flight. Never leaves this module."""
+
+    token: str
+    item: sqlite3.Row
+    tag_slug: str
+    routed_from: str | None
+    section: dict[str, Any]
+    choices: list[str] | None
+    passage: str | None
+    capture_fields: list[str]
+    started_at: str
+    phase: Phase = Phase.PRESENTED
+    highest_rung_served: int = 0
+    capture: capture_mod.Capture | None = None
+    answer_given: str | None = None
+    correct: bool | None = None
+    min_hint_level: int = 0
+    explanation: str | None = None
+    attempt_id: int | None = None
+    briefing_text: str | None = None
+
+
+class DrillStore:
+    """In-memory drill state, keyed by token. WEB_UI.md §9 question 1.
+
+    In-memory for now: an abandoned drill is lost on restart, which costs an
+    ungraded capture and nothing else. If abandonment turns out to be worth
+    measuring -- and it is diagnostic -- this grows a table behind the same
+    three methods.
+    """
+
+    def __init__(self) -> None:
+        self._drills: dict[str, _Drill] = {}
+
+    def put(self, drill: _Drill) -> None:
+        self._drills[drill.token] = drill
+
+    def get(self, token: str) -> _Drill:
+        try:
+            return self._drills[token]
+        except KeyError:
+            raise UnknownDrill(
+                f"no drill in progress for token {token!r} -- it expired or the "
+                "server restarted; nothing was recorded"
+            ) from None
+
+    def drop(self, token: str) -> None:
+        self._drills.pop(token, None)
+
+
+DEFAULT_STORE = DrillStore()
+
+
+# ------------------------------------------------------------- the service
+
+
+class DrillSession:
+    """One learner, one product, the drill loop. Front ends are adapters."""
+
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        product: dict[str, Any],
+        learner: str,
+        store: DrillStore | None = None,
+    ) -> None:
+        self.conn = conn
+        self.product = product
+        self.learner = learner
+        self.store = store if store is not None else DEFAULT_STORE
+
+    # -- phase 0 -----------------------------------------------------------
+
+    def start(self, tag: str | None = None) -> Served | Satisfied | Starved:
+        """Pick what to work on and serve it, key withheld."""
+        state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
+        objective = objective_base.build(self.product["objective"])
+        if objective.satisfied(state):
+            return Satisfied()
+
+        edges = db.load_edges(self.conn, self.product["product_id"])
+        ranked = [
+            a
+            for a in allocator.rank(state, objective, edges, limit=RANK_LIMIT)
+            if a.priority > 0
+        ]
+        if tag:
+            ranked = [a for a in ranked if a.tag_slug == tag]
+        if not ranked:
+            return Starved(
+                "Nothing servable. The report shows what the corpus is missing.",
+                tag_slug=tag,
+            )
+
+        alloc = ranked[0]
+        lo, hi = alloc.target_band
+        item = db.pick_item(self.conn, self.product["product_id"], alloc.tag_slug, lo, hi)
+        if item is None:
+            return Starved(
+                f"no item for {alloc.tag_slug} in band {lo:.0f}-{hi:.0f}",
+                tag_slug=alloc.tag_slug,
+            )
+
+        drill = _Drill(
+            token=secrets.token_urlsafe(16),
+            item=item,
+            tag_slug=alloc.tag_slug,
+            routed_from=alloc.routed_from,
+            section=self.product["sections"][item["section_slug"]],
+            choices=json.loads(item["choices_json"]) if item["choices_json"] else None,
+            passage=db.load_passage(self.conn, item["passage_id"]),
+            capture_fields=capture_mod.active_fields(self.product),
+            started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        self.store.put(drill)
+
+        return Served(
+            token=drill.token,
+            item_id=item["item_id"],
+            tag_slug=drill.tag_slug,
+            routed_from=drill.routed_from,
+            stem=item["stem"],
+            choices=drill.choices,
+            passage=drill.passage,
+            section_slug=item["section_slug"],
+            target_band=alloc.target_band,
+            capture_fields=drill.capture_fields,
+        )
+
+    # -- phase 1 -----------------------------------------------------------
+
+    def request_hint(self, token: str, level: int) -> hints.Rung:
+        """Serve one rung and remember that it was served.
+
+        Only before the verdict: once the key is out, a rung measures nothing.
+        The ladder does not unroll -- one call, one rung (pedagogy/hints).
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.PRESENTED, Phase.CAPTURED)
+        rung = hints.rung(level)  # validates the range
+        drill.highest_rung_served = max(drill.highest_rung_served, level)
+        return rung
+
+    def submit_capture(self, token: str, capture: capture_mod.Capture) -> Accepted:
+        """Fix the blind capture. Raises `CaptureError`; the key stays withheld."""
+        drill = self.store.get(token)
+        self._require(drill, Phase.PRESENTED)
+        capture_mod.validate(capture, drill.capture_fields)
+        drill.capture = capture
+        drill.phase = Phase.CAPTURED
+        return Accepted(token=token, fields=list(drill.capture_fields))
+
+    # -- phase 2 -----------------------------------------------------------
+
+    def submit_answer(
+        self, token: str, answer: str, reported_hint_level: int | None = None
+    ) -> Verdict:
+        """Grade deterministically, server-side. The model never grades.
+
+        `reported_hint_level` is the CLI's after-the-fact self-report. It acts
+        as a floor, never a ceiling: a front end that served rungs one at a
+        time already knows better, and taking the max means a self-report can
+        only ever be more honest than the observation, not less. That is not
+        DRM (§4.3) -- it declines to *un-observe* something already served.
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.CAPTURED)
+
+        reported = reported_hint_level or 0
+        if not 0 <= reported <= hints.MAX_LEVEL:
+            raise ValueError(f"hint level must be 0-{hints.MAX_LEVEL}, got {reported}")
+
+        drill.answer_given = answer
+        drill.correct = grading.grade(answer, drill.item["answer_key"])
+        drill.min_hint_level = max(drill.highest_rung_served, reported)
+        drill.phase = Phase.ANSWERED
+
+        return Verdict(
+            correct=drill.correct,
+            answer_key=drill.item["answer_key"],
+            answer_given=answer,
+            min_hint_level=drill.min_hint_level,
+            competence=hints.competence_score(drill.min_hint_level, drill.correct),
+        )
+
+    def submit_explain_back(self, token: str, text: str) -> explain_back.GateResult:
+        """The gate. Nothing is persisted until it passes, and it has no skip.
+
+        A failed gate leaves the drill in `ANSWERED`, so the caller loops. The
+        only way past is a well-formed explanation, which is the mechanism
+        rather than an obstacle in front of it (DESIGN.md principle 10).
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.ANSWERED)
+
+        gate = explain_back.check(text)
+        if not gate.passed:
+            return gate
+
+        drill.explanation = text.strip()
+        cap_row = drill.capture.as_row()  # type: ignore[union-attr]
+        cap_row["answer_given"] = drill.answer_given
+        drill.attempt_id = db.record_attempt(
+            self.conn,
+            self.learner,
+            self.product["product_id"],
+            drill.item,
+            drill.tag_slug,
+            cap_row,
+            bool(drill.correct),
+            drill.min_hint_level,
+            drill.started_at,
+        )
+        drill.phase = Phase.EXPLAINED
+        return gate
+
+    # -- phase 3 -----------------------------------------------------------
+
+    def briefing(self, token: str) -> Briefing:
+        """Render the outbound half of the exchange and log it."""
+        drill = self.store.get(token)
+        self._require(drill, Phase.EXPLAINED, Phase.BRIEFED)
+        if drill.briefing_text is not None:
+            return Briefing(
+                text=drill.briefing_text,
+                attempt_id=int(drill.attempt_id),  # type: ignore[arg-type]
+                prompt_version=briefing_mod.PROMPT_VERSION,
+                item_id=drill.item["item_id"],
+            )
+
+        item = drill.item
+        capture = drill.capture
+        b_item = briefing_mod.BriefingItem(
+            item_id=item["item_id"],
+            stem=item["stem"],
+            choices=drill.choices,
+            answer_key=item["answer_key"],
+            official_expl=item["official_expl"],
+            passage=drill.passage,
+            section_slug=item["section_slug"],
+            explanation_policy=drill.section.get("explanation_policy", "withheld"),
+            tags=[drill.tag_slug],
+        )
+        b_cap = briefing_mod.BriefingCapture(
+            confidence=capture.confidence,  # type: ignore[union-attr]
+            rationale=capture.rationale,  # type: ignore[union-attr]
+            verification_method=capture.verification_method,  # type: ignore[union-attr]
+            answer_given=drill.answer_given,
+            correct=bool(drill.correct),
+            min_hint_level=drill.min_hint_level,
+        )
+        text = briefing_mod.render(b_item, b_cap)
+        text += f"\n\n--- LEARNER'S EXPLAIN-BACK ---\n{drill.explanation}\n"
+
+        db.record_exchange(
+            self.conn, int(drill.attempt_id), briefing_mod.PROMPT_VERSION, text, None  # type: ignore[arg-type]
+        )
+        drill.briefing_text = text
+        drill.phase = Phase.BRIEFED
+
+        return Briefing(
+            text=text,
+            attempt_id=int(drill.attempt_id),  # type: ignore[arg-type]
+            prompt_version=briefing_mod.PROMPT_VERSION,
+            item_id=item["item_id"],
+        )
+
+    def finish(self, token: str) -> None:
+        """Release in-flight state. The attempt is already durable."""
+        self.store.drop(token)
+
+    # -- the inbound half, later and possibly in another process ----------
+
+    def record(self, attempt_id: int, pasted_text: str) -> record_mod.Diagnosis:
+        """Parse a returned payload and log it against `attempt_id`.
+
+        Rejects on `item_id` mismatch inside `exchange/record` -- the check
+        that makes the copy-paste protocol safe without an API. The item id
+        comes from the attempt row, never from the caller, so a stale tab
+        cannot land a diagnosis on the wrong item by supplying both halves.
+        """
+        row = self.conn.execute(
+            "SELECT item_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        if row is None:
+            raise record_mod.RecordError(f"no attempt {attempt_id}")
+
+        product_codes = frozenset(self.product.get("error_code_weights", {}) or {})
+        diagnosis = record_mod.parse(pasted_text, row["item_id"], product_codes)
+
+        db.record_diagnosis(self.conn, attempt_id, diagnosis)
+        self.conn.execute(
+            "UPDATE exchanges SET payload_json = ? WHERE attempt_id = ?",
+            (json.dumps(diagnosis.raw), attempt_id),
+        )
+        self.conn.commit()
+        return diagnosis
+
+    # -- internals ---------------------------------------------------------
+
+    @staticmethod
+    def _require(drill: _Drill, *allowed: Phase) -> None:
+        if drill.phase not in allowed:
+            expected = " or ".join(p.value for p in allowed)
+            raise PhaseError(
+                f"drill is at phase {drill.phase.value!r}, this step needs {expected}"
+            )
+
+
+# ------------------------------------------------------------------ helpers
+
+
+def build_capture(values: dict[str, Any], fields: list[str]) -> capture_mod.Capture:
+    """Coerce raw front-end strings into a `Capture`.
+
+    Both callers receive text -- a terminal prompt and a form post -- and both
+    need `confidence` as an int or `None`. Coercing it in one place stops the
+    two front ends disagreeing about what `"3 "` or `"three"` means.
+    """
+    cap = capture_mod.Capture()
+    for field_name in fields:
+        raw = values.get(field_name)
+        if field_name == "confidence":
+            text = str(raw).strip() if raw is not None else ""
+            cap.confidence = int(text) if text.isdigit() else None
+        else:
+            setattr(cap, field_name, str(raw).strip() if raw is not None else None)
+    return cap

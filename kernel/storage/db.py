@@ -219,6 +219,16 @@ def ensure_learner(conn: sqlite3.Connection, learner_id: str) -> None:
 # ------------------------------------------------------------------ reading
 
 
+def load_passage(conn: sqlite3.Connection, passage_id: str | None) -> str | None:
+    """Passage text for an item, or None when the item stands alone."""
+    if not passage_id:
+        return None
+    row = conn.execute(
+        "SELECT text FROM passages WHERE passage_id = ?", (passage_id,)
+    ).fetchone()
+    return row["text"] if row else None
+
+
 def _items_in_band(
     conn: sqlite3.Connection, product_id: str, tag_slug: str, lo: float, hi: float
 ) -> int:

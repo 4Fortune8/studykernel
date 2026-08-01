@@ -3,6 +3,10 @@
 The loop is: capture (blind) -> grade (deterministic) -> tutor briefing (out)
 -> record (in). DESIGN.md §16 v0.
 
+The loop itself lives in `kernel/session.py`; this module is the terminal
+adapter over it. Anything here that decides something rather than prompting
+for it or printing it belongs on the other side of that seam.
+
 Principle 10 governs the interaction design: friction on the diagnostic loop
 is fatal, and every step here has to justify itself. The explain-back gate is
 the sole exception, because there the friction *is* the mechanism.
@@ -14,16 +18,14 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-from kernel import allocator, config
+from kernel import allocator, config, session
 from kernel.analytics import report as report_mod
-from kernel.exchange import briefing as briefing_mod
 from kernel.exchange import record as record_mod
 from kernel.objectives import base as objective_base
 from kernel.pedagogy import capture as capture_mod
-from kernel.pedagogy import explain_back, grading, hints
+from kernel.pedagogy import hints
 from kernel.storage import db
 
 DEFAULT_LEARNER = "me"
@@ -110,61 +112,43 @@ def cmd_next(args: argparse.Namespace) -> int:
 
 
 def cmd_drill(args: argparse.Namespace) -> int:
+    """Terminal adapter over `session.DrillSession`. Prompting only, no logic.
+
+    Every decision here belongs to the service: this function asks questions,
+    prints answers, and owns exactly one thing the service does not -- writing
+    the briefing to a file, because the kernel does no file I/O.
+    """
     product, conn = _load(args)
-    state, objective = _state_and_objective(product, conn, args.learner)
+    drill = session.DrillSession(conn, product, args.learner)
 
-    if objective.satisfied(state):
-        print("Objective satisfied with margin. Stop studying.")
+    served = drill.start(tag=args.tag)
+    if isinstance(served, session.Satisfied):
+        print(served.message)
         return 0
-
-    edges = db.load_edges(conn, product["product_id"])
-    ranked = [a for a in allocator.rank(state, objective, edges, limit=25) if a.priority > 0]
-    if args.tag:
-        ranked = [a for a in ranked if a.tag_slug == args.tag]
-    if not ranked:
-        print("Nothing servable. `study report` shows what the corpus is missing.")
+    if isinstance(served, session.Starved):
+        print(served.reason)
         return 1
 
-    alloc = ranked[0]
-    lo, hi = alloc.target_band
-    item = db.pick_item(conn, product["product_id"], alloc.tag_slug, lo, hi)
-    if item is None:
-        print(f"no item for {alloc.tag_slug} in band {lo:.0f}-{hi:.0f}")
-        return 1
-
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    section = product["sections"][item["section_slug"]]
-    choices = json.loads(item["choices_json"]) if item["choices_json"] else None
-
-    passage = None
-    if item["passage_id"]:
-        row = conn.execute(
-            "SELECT text FROM passages WHERE passage_id = ?", (item["passage_id"],)
-        ).fetchone()
-        passage = row["text"] if row else None
-
     print("=" * 68)
-    print(f"tag: {alloc.tag_slug}    item: {item['item_id']}")
+    print(f"tag: {served.tag_slug}    item: {served.item_id}")
     print("=" * 68)
-    if passage:
-        print(f"\n{passage}\n")
-    print(item["stem"])
-    if choices:
-        for letter, choice in zip("ABCDEFGH", choices, strict=False):
+    if served.passage:
+        print(f"\n{served.passage}\n")
+    print(served.stem)
+    if served.choices:
+        for letter, choice in zip("ABCDEFGH", served.choices, strict=False):
             print(f"  {letter}. {choice}")
 
     # ---- pre-answer capture, written blind
-    fields = capture_mod.active_fields(product)
     print("\n--- before you answer (the key is not shown yet) ---")
-    cap = capture_mod.Capture()
-    for field in fields:
-        answer = input(f"{capture_mod.KNOWN_FIELDS[field]}\n> ").strip()
-        if field == "confidence":
-            cap.confidence = int(answer) if answer.isdigit() else None
-        else:
-            setattr(cap, field, answer)
+    values = {
+        name: input(f"{capture_mod.KNOWN_FIELDS[name]}\n> ")
+        for name in served.capture_fields
+    }
     try:
-        capture_mod.validate(cap, fields)
+        drill.submit_capture(
+            served.token, session.build_capture(values, served.capture_fields)
+        )
     except capture_mod.CaptureError as exc:
         print(f"\ncapture rejected: {exc}\nNothing recorded.")
         return 1
@@ -173,92 +157,44 @@ def cmd_drill(args: argparse.Namespace) -> int:
     level_raw = input(f"Lowest hint level you needed (0-{hints.MAX_LEVEL})\n> ").strip()
     min_hint = int(level_raw) if level_raw.isdigit() else 0
 
-    correct = grading.grade(given, item["answer_key"])
-    print(f"\n{'CORRECT' if correct else 'WRONG'}   key: {item['answer_key']}")
+    verdict = drill.submit_answer(served.token, given, reported_hint_level=min_hint)
+    print(f"\n{'CORRECT' if verdict.correct else 'WRONG'}   key: {verdict.answer_key}")
 
     # ---- the explain-back gate: mandatory, no skip flag
     while True:
-        explanation = input(
-            "\nExplain the solution path in your own words (this is the gate):\n> "
-        ).strip()
-        gate = explain_back.check(explanation)
+        gate = drill.submit_explain_back(
+            served.token,
+            input("\nExplain the solution path in your own words (this is the gate):\n> "),
+        )
         if gate.passed:
             break
         print(f"  {gate.reason}")
 
-    cap_row = cap.as_row()
-    cap_row["answer_given"] = given
-    attempt_id = db.record_attempt(
-        conn,
-        args.learner,
-        product["product_id"],
-        item,
-        alloc.tag_slug,
-        cap_row,
-        correct,
-        min_hint,
-        started_at,
-    )
-
-    b_item = briefing_mod.BriefingItem(
-        item_id=item["item_id"],
-        stem=item["stem"],
-        choices=choices,
-        answer_key=item["answer_key"],
-        official_expl=item["official_expl"],
-        passage=passage,
-        section_slug=item["section_slug"],
-        explanation_policy=section.get("explanation_policy", "withheld"),
-        tags=[alloc.tag_slug],
-    )
-    b_cap = briefing_mod.BriefingCapture(
-        confidence=cap.confidence,
-        rationale=cap.rationale,
-        verification_method=cap.verification_method,
-        answer_given=given,
-        correct=correct,
-        min_hint_level=min_hint,
-    )
-    text = briefing_mod.render(b_item, b_cap)
-    text += f"\n\n--- LEARNER'S EXPLAIN-BACK ---\n{explanation}\n"
-
+    briefing = drill.briefing(served.token)
     out = Path(args.briefing_out)
-    out.write_text(text)
-    db.record_exchange(conn, attempt_id, briefing_mod.PROMPT_VERSION, text, None)
+    out.write_text(briefing.text)
+    drill.finish(served.token)
 
     print("\n" + "=" * 68)
     print(f"Briefing written to {out}")
     print("Paste it into your chat client, then:")
-    print(f"  study record {attempt_id} --product {args.product}")
+    print(f"  study record {briefing.attempt_id} --product {args.product}")
     print("=" * 68)
     return 0
 
 
 def cmd_record(args: argparse.Namespace) -> int:
     product, conn = _load(args)
-    row = conn.execute(
-        "SELECT item_id FROM attempts WHERE attempt_id = ?", (args.attempt_id,)
-    ).fetchone()
-    if row is None:
-        print(f"no attempt {args.attempt_id}")
-        return 1
+    drill = session.DrillSession(conn, product, args.learner)
 
     print("Paste the returned JSON block, then Ctrl-D:")
     pasted = sys.stdin.read()
 
-    product_codes = frozenset(product.get("error_code_weights", {}) or {})
     try:
-        diagnosis = record_mod.parse(pasted, row["item_id"], product_codes)
+        diagnosis = drill.record(args.attempt_id, pasted)
     except record_mod.RecordError as exc:
         print(f"rejected: {exc}")
         return 1
-
-    db.record_diagnosis(conn, args.attempt_id, diagnosis)
-    conn.execute(
-        "UPDATE exchanges SET payload_json = ? WHERE attempt_id = ?",
-        (json.dumps(diagnosis.raw), args.attempt_id),
-    )
-    conn.commit()
 
     print(f"recorded: {diagnosis.error_code}")
     print(f"one fix:  {diagnosis.one_fix}")

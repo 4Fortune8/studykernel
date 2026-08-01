@@ -53,7 +53,19 @@ objective:
       - "crc_estimate >= 950"
       - "all_domains(diagnostic_level >= 6)"
     elar:
-      # The essay is a gate, not a polish step: a learner can be excellent on
-      # multiple choice and fail ELAR on the essay alone.
-      # DATA_SOURCING_ELAR.md §4.4.
-      - "elar_crc_estimate >= 945 AND essay_score >= 5"
+      - "elar_crc_estimate >= 945"
+
+    # The essay is a gate, not a polish step: a learner can be excellent on
+    # multiple choice and fail ELAR on the essay alone. DATA_SOURCING_ELAR.md
+    # §4.4.
+    #
+    # Its own group rather than a conjunct of the ELAR route, because groups
+    # are separate requirements and this is one. As a conjunct it did more
+    # than gate: with essay_score unscored at 0, the AND drove the partial
+    # derivative with respect to ELAR ability to exactly zero, and the
+    # allocator stopped serving English entirely -- 1,359 reading items in
+    # band, gradient 0.00000000. Split out, P(pass) is identical, the essay
+    # still blocks readiness, and the reading half is studiable while the
+    # essay loop is deferred.
+    essay:
+      - "essay_score >= 5"
