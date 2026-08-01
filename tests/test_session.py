@@ -141,11 +141,11 @@ def good_capture():
     )
 
 
-def advance_to_gate(drill):
+def advance_to_gate(drill, answer=SECRET_KEY):
     """Run a drill up to the explain-back gate. Returns (served, verdict)."""
     served = drill.start()
     drill.submit_capture(served.token, good_capture())
-    verdict = drill.submit_answer(served.token, SECRET_KEY)
+    verdict = drill.submit_answer(served.token, answer)
     return served, verdict
 
 
@@ -242,6 +242,29 @@ def test_the_gate_can_be_retried_and_then_records(drill, conn):
     long_enough = " ".join(["carried", "the", "ten", "then", "added"] * 4)
     assert drill.submit_explain_back(served.token, long_enough).passed is True
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+
+
+def test_not_knowing_where_to_start_passes_the_gate_and_is_recorded(drill, conn):
+    """Escalation, not evasion. See `pedagogy/explain_back.check`.
+
+    The learner who had no method has nothing to articulate, and demanding a
+    path from them yields a fabricated one -- which the briefing then reads as
+    their actual reasoning and diagnoses a divergence that never happened. So
+    the declaration passes, and it is stored as a declaration.
+    """
+    served, _ = advance_to_gate(drill, answer="wrong")
+    assert drill.submit_explain_back(served.token, "", stuck=True).passed is True
+
+    row = conn.execute("SELECT stuck FROM attempts").fetchone()
+    assert row["stuck"] == 1
+    assert explain_back.STUCK_DECLARATION in drill.briefing(served.token).text
+
+
+def test_the_gate_still_refuses_an_empty_explanation_without_the_declaration(drill, conn):
+    """The declaration has to be made, not merely implied by leaving it blank."""
+    served, _ = advance_to_gate(drill, answer="wrong")
+    assert drill.submit_explain_back(served.token, "   ").passed is False
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
 
 
 def test_no_method_takes_a_skip_flag():

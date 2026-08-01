@@ -22,25 +22,31 @@
   {# Same gate, two framings. Asking someone who just got it right to "explain
      it back" reads as a request to justify themselves to a machine that
      already knows the answer, and the honest reply is "I got it right". So on
-     a hit, ask the question the verdict above cannot answer: not what you did,
-     but why it holds. On a miss the path is still the useful thing to write.
+     a hit, do not re-ask at all: the blind rationale IS the answer to "why is
+     this right", it was written minutes ago, and asking for it a second time
+     taught the learner that the box does not read what they typed. Hand it
+     back instead, and ask the one question the verdict just created -- whether
+     it held for that reason. Confirming takes a keystroke; correcting is the
+     case worth catching, because right-for-the-wrong-reason is invisible in
+     every other field on this page.
 
-     The framing is all that changes. There is still no skip -- least of all
-     here, where the note above has just finished explaining that a correct
-     answer is exactly the signal that does not tell you which of L1 and L4 you
-     were at. A gate that opens whenever you are right is not a gate. #}
+     On a miss the path is still the useful thing to write, and it is still not
+     skippable -- but "I don't know where to start" is an answer to the
+     question rather than an escape from it, and it routes the exchange to a
+     lesson instead of a correction. See pedagogy/explain_back. #}
   {% if view.verdict.correct %}
-    <h2>In two sentences, why is your answer right?</h2>
+    <h2>Did it hold for the reason you gave?</h2>
     <p class="note">
-      Not whether it is right — you know that. Why it holds. That is the part
-      correctness above cannot tell you, and articulating it is what encodes
-      it. A sentence is enough; there is no length to reach.
+      What you wrote before you knew is below. Leave it if it stands; change it
+      if the real reason turned out to be something else. That gap — right
+      answer, wrong reason — is the one thing the verdict above cannot show you.
     </p>
   {% else %}
     <h2>Explain it back</h2>
     <p class="note">
-      The solution path in your own words. Articulating it is what encodes it,
-      which is why there is no skip.
+      The solution path in your own words — a few words is enough. If you had
+      no method to write down, say so with the button; that is worth more here
+      than a reconstruction, and it changes what comes back to you.
     </p>
   {% endif %}
 
@@ -48,9 +54,21 @@
 
   <form hx-post="/drill/{{ token }}/explain" hx-target="#panel" class="stack wide">
     <label class="block">
+      {# Seeded from the blind rationale on a hit, so the learner edits rather
+         than retypes. Only on a hit: pre-filling a miss would invite them to
+         submit reasoning they have just been told is wrong. #}
       <textarea name="explanation" rows="5" required
-        placeholder="{% if view.verdict.correct %}Why the answer holds — two sentences.{% else %}How you got there — the path, not the answer.{% endif %}">{{ (submitted and submitted.explanation) or "" }}</textarea>
+        placeholder="{% if view.verdict.correct %}Why the answer holds.{% else %}How you got there — the path, not the answer.{% endif %}">{{ (submitted and submitted.explanation) or (view.verdict.correct and view.rationale) or "" }}</textarea>
     </label>
     <button type="submit">Submit explanation</button>
+    {% if not view.verdict.correct %}
+      {# Same form, different button: `name` is only submitted by the button
+         actually clicked, so this needs no JavaScript and cannot fire by
+         accident. `formnovalidate` because the textarea is `required` and the
+         whole point of this path is that it is empty. #}
+      <button type="submit" name="stuck" value="1" formnovalidate class="secondary">
+        I don't know where to start
+      </button>
+    {% endif %}
   </form>
 </section>

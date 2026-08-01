@@ -1,0 +1,35 @@
+{# The options, and the only place they are drawn. WEB_UI.md §4.4.
+
+   This sits outside `#panel`, under the stem where it reads -- but every
+   answer posts with `hx-target="#panel"`, so a plain include here would be
+   rendered once at page load and never again. The options would vanish with
+   the answer form and leave "Key: C -- you answered B" as two bare letters,
+   which is what a learner looking at a wrong answer least wants.
+
+   So `_swap.html` re-emits this block out of band on every panel response.
+   The wrapper is always present, even when it has nothing in it, because an
+   out-of-band swap needs an element with this id already in the DOM to
+   replace -- and the transition that matters (radios up, then gone) starts
+   from exactly that empty case. #}
+<div id="choices"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if served.choices and not (view.phase.value in ("presented", "captured") and served.choice_values) %}
+    {# Empty until there is a verdict, and empty forever on an item whose key
+       matches no option -- `choice_values` returns None there, so there is
+       nothing a mark could honestly point at. #}
+    {% set marks = (view.verdict and view.verdict.choice_marks) or [] %}
+    <ol class="choices math" type="A">
+      {# `delimit_math` only wraps expressions that carry no delimiters of
+         their own -- MMLU stores `\frac{7}{9}` bare, and auto-render cannot
+         find what is not marked. See web/mathtext.py. #}
+      {% for choice in served.choices %}
+        {% set mark = marks[loop.index0] if loop.index0 < marks|length else None %}
+        <li{% if mark %} class="opt {{ mark }}"{% endif %}>
+          {{ choice|delimit_math }}
+          {% if mark == "both" %}<span class="tag">key — your answer</span>
+          {% elif mark == "key" %}<span class="tag">key</span>
+          {% elif mark == "given" %}<span class="tag">your answer</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</div>

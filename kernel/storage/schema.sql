@@ -191,6 +191,12 @@ CREATE TABLE IF NOT EXISTS attempts (
     -- attempt exist at all, so this is the reviewer's half, not the gate's.
     resolved     INTEGER NOT NULL DEFAULT 0,
 
+    -- The learner passed the gate by declaring they had no method, rather
+    -- than by writing one. A column and not an inference from the explanation
+    -- text: this is the difference between a wrong method and no method, and
+    -- a report that wants to count it should not be grepping prose.
+    stuck        INTEGER NOT NULL DEFAULT 0 CHECK (stuck IN (0, 1)),
+
     -- Which tag this was served for, and therefore which one the rating moved.
     -- An item can carry several; only one of them was the reason it appeared.
     tag_slug     TEXT,
@@ -221,6 +227,14 @@ CREATE TABLE IF NOT EXISTS diagnoses (
     error_code             TEXT NOT NULL,
     prerequisite_gaps_json TEXT NOT NULL DEFAULT '[]',
     one_fix                TEXT NOT NULL,   -- singular by prompt contract
+    -- Where this attempt broke, quoted from the learner's own work. Nullable:
+    -- payloads from prompt versions before the field existed have none, and
+    -- `prompt_version` on the exchange is what tells the two cases apart.
+    divergence             TEXT,
+    -- The reader's worked solution. `explain_back` below is the learner's own;
+    -- these are the two halves of the exchange and are kept apart because
+    -- comparing them is the point.
+    explanation            TEXT,
     trigger_miss           INTEGER NOT NULL DEFAULT 0,
     explain_back           TEXT,
     explain_back_ok        INTEGER

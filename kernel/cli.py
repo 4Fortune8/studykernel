@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from kernel.analytics import report as report_mod
 from kernel.exchange import record as record_mod
 from kernel.objectives import base as objective_base
 from kernel.pedagogy import capture as capture_mod
-from kernel.pedagogy import hints
+from kernel.pedagogy import grading, hints
 from kernel.storage import db
 
 DEFAULT_LEARNER = "me"
@@ -153,10 +154,23 @@ def cmd_drill(args: argparse.Namespace) -> int:
         print(f"\ncapture rejected: {exc}\nNothing recorded.")
         return 1
 
-    # Re-prompt rather than grade an empty box -- see session.BlankAnswer.
+    # Re-prompt rather than grade an empty box -- see session.BlankAnswer. The
+    # same courtesy for a numeric item, where the way a right answer gets typed
+    # wrong is submitting the variable you named instead of the value you
+    # solved it to (grading.input_shape). Unbounded like the blank loop above,
+    # and for the same reason: there is a correct thing to type, and re-asking
+    # costs a line where grading it costs an item.
     given = input("\nYour answer\n> ").strip()
-    while not given:
-        given = input("An answer is required; there is nothing to grade otherwise\n> ").strip()
+    while True:
+        if not given:
+            prompt = "An answer is required; there is nothing to grade otherwise"
+        elif served.input_shape == grading.NUMERIC and not re.fullmatch(
+            grading.NUMERIC_INPUT_PATTERN, given
+        ):
+            prompt = "This one wants the number itself, not the name you gave it"
+        else:
+            break
+        given = input(f"{prompt}\n> ").strip()
 
     level_raw = input(f"Lowest hint level you needed (0-{hints.MAX_LEVEL})\n> ").strip()
     min_hint = int(level_raw) if level_raw.isdigit() else 0
@@ -165,16 +179,26 @@ def cmd_drill(args: argparse.Namespace) -> int:
     print(f"\n{'CORRECT' if verdict.correct else 'WRONG'}   key: {verdict.answer_key}")
 
     # ---- the explain-back gate: mandatory, no skip flag
-    # Same gate either way; a correct answer only changes what to ask for. On a
-    # miss the useful question is what the path *was*; on a hit it is why the
-    # path holds, which is the thing correctness alone never establishes.
-    ask = (
-        "\nIn two sentences, why is your answer right? (this is the gate):\n> "
-        if verdict.correct
-        else "\nExplain the solution path in your own words (this is the gate):\n> "
-    )
+    # On a hit the blind rationale already answers "why is this right", so it is
+    # handed back to edit rather than asked for twice; an empty line keeps it.
+    # On a miss the useful question is what the path *was* -- and `?` declares
+    # there was none, which is an answer to that question and not a way around
+    # it (pedagogy/explain_back).
+    if verdict.correct:
+        print(f"\nYou wrote, before you knew: {values.get('rationale', '')}")
+        ask = "Did it hold for that reason? (enter to keep it, or rewrite):\n> "
+    else:
+        ask = (
+            "\nExplain the solution path in your own words (this is the gate).\n"
+            "Enter ? if you did not know where to start:\n> "
+        )
+
     while True:
-        gate = drill.submit_explain_back(served.token, input(ask))
+        text = input(ask)
+        stuck = not verdict.correct and text.strip() == "?"
+        if verdict.correct and not text.strip():
+            text = values.get("rationale", "")
+        gate = drill.submit_explain_back(served.token, text, stuck=stuck)
         if gate.passed:
             break
         print(f"  {gate.reason}")
@@ -206,7 +230,11 @@ def cmd_record(args: argparse.Namespace) -> int:
         return 1
 
     print(f"recorded: {diagnosis.error_code}")
+    if diagnosis.divergence:
+        print(f"where it broke: {diagnosis.divergence}")
     print(f"one fix:  {diagnosis.one_fix}")
+    if diagnosis.explanation:
+        print(f"\n{diagnosis.explanation}")
     if diagnosis.disputed_key:
         print("item flagged disputed_key")
     if diagnosis.explain_back_ok is False:

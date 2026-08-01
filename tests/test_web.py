@@ -20,6 +20,7 @@ pytest.importorskip("fastapi", reason="web extra not installed")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from kernel import config  # noqa: E402
+from kernel.pedagogy import explain_back  # noqa: E402
 from kernel.storage import db  # noqa: E402
 
 # Distinctive on purpose. A single-letter key like "D" appears inside "<div>"
@@ -70,8 +71,23 @@ edges: []
 """
 
 
+# What varies between the two kinds of item the answer control has to serve.
+# The fixture takes one of these via `indirect=True` so a test about the
+# numeric box is one parametrize line rather than a second copy of the pack.
+MC_ITEM = {
+    "item_type": "mc",
+    "choices": ["alpha-1", SECRET_KEY, "gamma-3", "delta-4"],
+    "answer_key": SECRET_KEY,
+}
+NUMERIC_ITEM = {
+    "item_type": "numeric",
+    "choices": None,
+    "answer_key": "13",
+}
+
+
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(request, tmp_path, monkeypatch):
     pack_dir = tmp_path / "pack"
     (pack_dir / "taxonomy").mkdir(parents=True)
     (pack_dir / "product.yaml").write_text(PRODUCT_YAML)
@@ -92,13 +108,11 @@ def client(tmp_path, monkeypatch):
                 "item_id": f"i{n}",
                 "product_id": pack["product_id"],
                 "section": "quant",
-                "item_type": "mc",
                 "stem": "Pick the right one.",
-                "choices": ["alpha-1", SECRET_KEY, "gamma-3", "delta-4"],
-                "answer_key": SECRET_KEY,
                 "source": "test",
                 "license": "test",
                 "tags": [{"slug": "fractions", "label_source": "official", "reviewed": 1}],
+                **getattr(request, "param", MC_ITEM),
             }
             for n in range(6)
         ],
@@ -125,6 +139,11 @@ def start_drill(client) -> str:
     return response.headers["location"].rsplit("/", 1)[1]
 
 
+# Distinctive enough to assert on: the gate hands the blind rationale back
+# after a hit, so a test needs to recognise it in the page.
+RATIONALE = "The second option restates the stem."
+
+
 def work_item(client, token, answer=SECRET_KEY, **overrides):
     """Capture and answer in one post, because they are one form now (§4.1).
 
@@ -134,7 +153,7 @@ def work_item(client, token, answer=SECRET_KEY, **overrides):
     """
     data = {
         "confidence": "3",
-        "rationale": "The second option restates the stem.",
+        "rationale": RATIONALE,
         "verification_method": "re-read the qualifier",
         "answer": answer,
     }
@@ -241,6 +260,43 @@ def test_a_multiple_choice_item_is_answered_by_selection(client):
     assert not CHOICE_LIST.findall(body)
 
 
+def test_the_options_come_back_marked_in_the_answer_swap(client):
+    """"Key: C -- you answered B" is two bare letters without the options.
+
+    They live above `#panel` and every answer posts with `hx-target="#panel"`,
+    so the swap has to carry them out of band or they stay gone until a manual
+    refresh -- which is precisely when a wrong answer needs them most.
+    """
+    token = start_drill(client)
+    body = client.get(f"/drill/{token}").text
+    radios = re.findall(r'<input type="radio" name="answer" value="([^"]*)"', body)
+    assert not CHOICE_LIST.findall(body), "sanity: the radios are the only copy"
+
+    panel = work_item(client, token, answer=radios[0]).text  # B is the key, so A is wrong
+    assert 'id="choices"' in panel and 'hx-swap-oob="true"' in panel
+    assert CHOICE_LIST.findall(panel), "the options are back"
+    assert 'class="opt given"' in panel and 'class="opt key"' in panel
+
+
+def test_a_correct_answer_marks_one_option_as_both(client):
+    """The key and the answer given are the same option; it must not print twice."""
+    token = start_drill(client)
+    panel = work_item(client, token).text
+    assert 'class="opt both"' in panel
+    assert 'class="opt given"' not in panel and 'class="opt key"' not in panel
+
+
+def test_the_marked_options_survive_a_refresh(client):
+    """Swap and refresh render the same partial, so they cannot disagree."""
+    token = start_drill(client)
+    work_item(client, token, answer="not-it")
+    page = client.get(f"/drill/{token}").text
+    assert CHOICE_LIST.findall(page)
+    assert 'class="opt key"' in page
+    # The full page is not a swap target, so it must not claim to be one.
+    assert 'hx-swap-oob' not in page
+
+
 def test_selecting_the_keyed_option_grades_correct(client):
     """The end of the round trip: what a radio submits is what `grade` reads."""
     token = start_drill(client)
@@ -248,6 +304,62 @@ def test_selecting_the_keyed_option_grades_correct(client):
     radios = re.findall(r'<input type="radio" name="answer" value="([^"]*)"', body)
     panel = work_item(client, token, answer=radios[1]).text  # SECRET_KEY is option B
     assert "Correct" in panel
+
+
+@pytest.mark.parametrize("client", [NUMERIC_ITEM], indirect=True)
+def test_a_numeric_item_gets_a_box_that_will_not_take_letters(client):
+    """The other half of "answered by selection, not transcription".
+
+    A radio cannot be mistyped; a text box can, and the way it gets mistyped is
+    that the learner solves for N, gets 13, and submits `N`. The box is
+    constrained to what `grade` can read so that mistake stops being a wrong
+    answer in the data.
+    """
+    from kernel.pedagogy import grading
+
+    body = client.get(f"/drill/{start_drill(client)}").text
+    assert 'type="radio"' not in body, "nothing to select on a numeric item"
+    box = re.search(r'<input name="answer"[^>]*>', body)
+    assert box, "a numeric item is answered in a text box"
+    assert 'pattern="' in box.group(0)
+
+    # The pattern is checked as the constant rather than as the rendered
+    # attribute, so an escaping change in the template cannot make this pass on
+    # markup no browser would enforce.
+    pattern = re.compile(grading.NUMERIC_INPUT_PATTERN)
+    for good in ("13", "-13", "0.5", ".50", "1/2", "1,000", "13.", " 13 ", r"\frac{1}{2}"):
+        assert pattern.fullmatch(good), f"the grader reads {good!r}; the box must take it"
+    for bad in ("N", "N = 13", "thirteen", "13 apples", "x"):
+        assert not pattern.fullmatch(bad), bad
+
+    # And the two agree on the forms of 13 that are 13: a guard rail that let
+    # through something the grader then marked wrong would be worse than none.
+    assert all(grading.grade(form, "13") for form in ("13", "13.", " 13 ", "13.0"))
+
+
+@pytest.mark.parametrize("client", [NUMERIC_ITEM], indirect=True)
+def test_the_numeric_box_says_nothing_about_which_number(client):
+    """The shape is a constant, not a projection of the key (§4.1).
+
+    A box narrowed to `^\\d{2}$` would say "two digits" and a box that took no
+    sign would say "positive". This one is the same string for every numeric
+    key, so the only thing on the page is "a number goes here".
+    """
+    from kernel.pedagogy import grading
+
+    body = client.get(f"/drill/{start_drill(client)}").text
+    assert "13" not in body
+    assert grading.input_shape("13") == grading.input_shape("-0.5") == grading.NUMERIC
+    assert grading.input_shape("7x") is None, "an expression keeps a plain box"
+    assert grading.input_shape("no") is None
+    assert grading.input_shape(None) is None
+
+
+@pytest.mark.parametrize("client", [NUMERIC_ITEM], indirect=True)
+def test_the_numeric_box_still_grades_what_it_accepts(client):
+    """The guard rail is in front of the grader, not in place of it."""
+    token = start_drill(client)
+    assert "Correct" in work_item(client, token, answer="13").text
 
 
 def test_a_numeric_item_still_gets_a_text_box(client):
@@ -299,7 +411,7 @@ def test_the_gate_must_pass_before_anything_is_recorded(client, tmp_path):
     work_item(client, token)
 
     panel = client.post(f"/drill/{token}/explain", data={"explanation": "dunno"}).text
-    assert "under 5 words" in panel
+    assert "under 3 words" in panel
 
     conn = db.connect(tmp_path / "web.db")
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
@@ -339,14 +451,23 @@ def test_the_gate_still_has_no_skip_when_the_answer_was_right(client):
 
 
 def test_the_gate_asks_a_different_question_when_the_answer_was_right(client):
+    """A hit must not re-ask the question the blind capture already asked.
+
+    The two used to share wording verbatim, so a correct answer was asked "why
+    is your answer right?" twice with nothing new to say the second time. On a
+    hit the gate now hands the rationale back and asks whether it *held*, which
+    is the question the verdict just created.
+    """
     right = work_item(client, start_drill(client)).text
     wrong = work_item(client, start_drill(client), answer="not-it").text
 
-    assert "why is your answer right" in right
+    assert "Did it hold for the reason you gave?" in right
+    assert RATIONALE in right, "the blind rationale is handed back, not re-asked"
     assert "Explain it back" not in right
 
     assert "Explain it back" in wrong
-    assert "why is your answer right" not in wrong
+    assert "Did it hold for the reason" not in wrong
+    assert RATIONALE not in wrong, "a miss must not be pre-filled with wrong reasoning"
 
 
 def test_a_short_justification_passes_the_gate_after_a_correct_answer(client, tmp_path):
@@ -364,15 +485,38 @@ def test_a_short_justification_passes_the_gate_after_a_correct_answer(client, tm
     conn.close()
 
 
-def test_the_short_floor_does_not_apply_after_a_wrong_answer(client):
-    """A miss still owes the path, which is longer than a justification."""
+def test_a_miss_can_be_answered_with_not_knowing_where_to_start(client, tmp_path):
+    """The declaration is an answer to the gate, not a way around it.
+
+    It records an attempt like any other path would -- that is what separates
+    it from the skip `explain_back` still refuses to grow -- and it reaches the
+    briefing as a declaration rather than as an empty explanation.
+    """
     token = start_drill(client)
     work_item(client, token, answer="not-it")
     panel = client.post(
-        f"/drill/{token}/explain",
-        data={"explanation": "both sides divide by three"},
+        f"/drill/{token}/explain", data={"explanation": "", "stuck": "1"}
     ).text
-    assert "under 12 words" in panel
+    assert "Briefing" in panel
+    # Substring rather than the constant: the briefing sits in a textarea, so
+    # the apostrophe in the declaration arrives HTML-escaped.
+    assert explain_back.STUCK_DECLARATION.split("'")[-1] in panel
+
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute("SELECT correct, stuck FROM attempts").fetchone()
+    conn.close()
+    assert (row["correct"], row["stuck"]) == (0, 1)
+
+
+def test_the_stuck_declaration_tells_the_reader_to_teach_not_to_correct(client):
+    """A reader with no path to correct must not invent one to diagnose."""
+    token = start_drill(client)
+    work_item(client, token, answer="not-it")
+    panel = client.post(
+        f"/drill/{token}/explain", data={"explanation": "", "stuck": "1"}
+    ).text
+    assert "did not know where to start" in panel
+    assert "Teach this item from the beginning" in panel
 
 
 # --------------------------------------------------- the whole loop
@@ -444,7 +588,7 @@ def test_refreshing_redraws_the_phase_instead_of_restarting(client):
     work_item(client, token)
     first = client.get(f"/drill/{token}").text
     second = client.get(f"/drill/{token}").text
-    assert "why is your answer right" in first  # the gate, not the capture form
+    assert "Did it hold for the reason" in first  # the gate, not the capture form
     assert "Before you answer" not in first
     assert first == second
 

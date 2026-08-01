@@ -1,0 +1,11 @@
+{# What every htmx panel response actually returns: the phase partial, plus an
+   out-of-band redraw of the options above it.
+
+   Wrapping here rather than including `_choices.html` at the foot of each
+   phase partial keeps the two in step by construction -- a fifth phase added
+   later gets the behaviour without anyone remembering to. And it is why swap
+   and refresh agree: `page.html` renders the same partial from the same view,
+   so there is one description of what the options look like at each phase
+   rather than one for arriving and one for staying. #}
+{% include partial %}
+{% with oob = true %}{% include "drill/_choices.html" %}{% endwith %}

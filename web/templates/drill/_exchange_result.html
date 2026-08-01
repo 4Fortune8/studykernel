@@ -6,7 +6,20 @@
 {% else %}
   <div class="diagnosis">
     <p><strong>{{ diagnosis.error_code }}</strong></p>
+    {# Above the fix on purpose: the fix is the habit to carry forward, but
+       this is the line the learner actually wrote and got wrong, and it is the
+       thing they came back to find out. When they showed no steps it reads as
+       an instruction for next time instead -- see briefing.NO_WORK_SHOWN. #}
+    {% if diagnosis.divergence %}
+      <p class="divergence">{{ diagnosis.divergence }}</p>
+    {% endif %}
     <p class="one-fix">{{ diagnosis.one_fix }}</p>
+    {# Last and longest: the worked solution. Below the fix because the fix is
+       the one line to carry to the next item, and burying it under a
+       paragraph is how it stops being read. #}
+    {% if diagnosis.explanation %}
+      <div class="worked math">{{ diagnosis.explanation|delimit_math }}</div>
+    {% endif %}
     {% if diagnosis.prerequisite_gaps %}
       <p class="note">prerequisite gaps: {{ diagnosis.prerequisite_gaps|join(", ") }}</p>
     {% endif %}

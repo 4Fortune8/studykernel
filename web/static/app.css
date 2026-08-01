@@ -229,6 +229,21 @@ label.choice:has(input:checked) { background: var(--rule); }
 button.ghost { border-color: var(--rule); color: var(--muted); }
 .note.inline { border: 0; padding: 0; font-size: 0.82rem; margin-left: 0.6rem; }
 
+/* After the verdict the options carry the key and the answer given, so the
+   two letters in "Key: C -- you answered B" have something to land on. The
+   colours match `.verdict` above: the same wrong is the same red on both. */
+.choices li.opt { padding: 0.15rem 0.4rem; border-radius: 4px; }
+.choices li.key, .choices li.both { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.choices li.given { background: color-mix(in srgb, #b4472f 14%, transparent); }
+.choices .tag {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
 .verdict.right { color: var(--accent); }
 .verdict.wrong { color: #b4472f; }
 @media (prefers-color-scheme: dark) { .verdict.wrong { color: #e8846a; } }
@@ -254,6 +269,32 @@ button.ghost { border-color: var(--rule); color: var(--muted); }
 
 .diagnosis { border: 1px solid var(--accent); border-radius: 6px; padding: 1rem 1.2rem; }
 .one-fix { font-size: 1.05rem; }
+
+/* Where this attempt broke, above the fix and set apart from it: one names
+   the line the learner wrote, the other names the habit to carry forward, and
+   reading as a single paragraph would blur them together. */
+.divergence {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+/* The worked solution. Read once, carefully, so it gets prose measure rather
+   than the tight leading the diagnosis lines above it use. */
+.worked {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--rule);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* The declaration on the gate. Quiet, because it is the second-best answer to
+   the question -- but present, because the alternative is an invented path. */
+button.secondary { border-color: var(--rule); color: var(--muted); }
+button.secondary:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
 
 /* KaTeX sits inside serif prose; nudge it so rendered maths does not tower
    over the sentence around it. */

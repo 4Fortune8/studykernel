@@ -291,8 +291,34 @@ Unchanged from v0.1/v0.2 in substance; restated as kernel invariants:
   highest-value minute in the loop and the step every other tool omits because
   it is friction. Mandatory after a *correct* answer too — that is the case it
   exists for, since correctness cannot distinguish L1 from L4. What changes on
-  a hit is only the question asked ("why does it hold" rather than "what did
-  you do") and the length expected of the reply; see WEB_UI.md §4.3.
+  a hit is only the question asked — the blind rationale is handed back and the
+  gate asks whether it *held*, rather than asking for it a second time. On a
+  miss, "I don't know where to start" is an accepted answer: it is recorded as
+  a declaration, it sets `attempts.stuck`, and it routes the exchange to a
+  lesson instead of a correction. Not a skip — a demanded path from a learner
+  who had no method is a fabrication, and a fabrication reaches the reader
+  looking like data. See WEB_UI.md §4.3.
+- **Divergence, not just a fix.** The exchange returns `divergence` alongside
+  `one_fix`: the first step in the learner's *own* work that is wrong, quoted,
+  with the corrected step. The fix is the habit to carry forward and
+  generalises past the item; the divergence is the line they actually wrote,
+  and it is what they came back to find out. When they showed no steps to
+  locate it in, the reader returns a fixed sentence saying so — the only point
+  in the loop where "show your work" can be said at the moment it would change
+  the next attempt.
+- **The explanation is a bridge, not a worked solution.** `explanation` returns
+  two things in one pass: what was flawed in the reasoning the learner actually
+  gave, and the route from what they did to what they should have done. A
+  detached solution — the item worked as though the learner had said nothing —
+  leaves them to map it onto their own thinking, which is exactly the step a
+  second "explain this" prompt was being sent to get. The measure is that no
+  follow-up question is left; three fields, said once each: `divergence` locates
+  the break, `one_fix` names the habit, `explanation` walks the route.
+  **Bounded by the item's explanation policy** — under `pinned_strict` it
+  unpacks the official text, under `anchored` every step is a verbatim quote. An
+  "explain step by step" instruction that did not say so would silently license
+  the derived reasoning §10 forbids on reading comprehension, and would do it
+  while reading as the more specific rule.
 - **Prerequisite DAG.** Seeded where an official taxonomy exists; learned from
   diagnosis `prerequisite_gaps` where it does not. Routing rule: ≥3 failures at
   L4+ stops the tag and serves its highest-confidence parents.

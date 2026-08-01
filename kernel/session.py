@@ -173,6 +173,10 @@ class Served:
     # option. See `grading.choice_values` for why this is computed here and
     # not in a template -- and for why it is not a key leak.
     choice_values: list[str] | None = None
+    # For the items `choice_values` leaves to a text box: which box. `None` is
+    # a plain one; `grading.NUMERIC` is one that will not take letters. A
+    # constant per shape, not per key -- see `grading.input_shape`.
+    input_shape: str | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +196,11 @@ class Verdict:
     answer_given: str
     min_hint_level: int
     competence: float
+    # Parallel to `Served.choices`: which option was the key, which was chosen,
+    # or both. "Key: C -- you answered B" is unreadable once the answer form is
+    # gone and C and B are just letters, and the moment a learner most wants to
+    # see the two options side by side is the moment they got it wrong.
+    choice_marks: list[str | None] = dataclasses_field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -210,6 +219,12 @@ class DrillView:
     verdict: Verdict | None = None
     rungs_shown: list[hints.Rung] = dataclasses_field(default_factory=list)
     explanation: str | None = None
+    # The blind rationale, handed back so the gate can show the learner what
+    # they already wrote instead of asking for it twice. Carrying it on the
+    # view rather than re-reading the capture keeps the template's only source
+    # of item data the one type that is guaranteed key-free.
+    rationale: str | None = None
+    stuck: bool = False
     attempt_id: int | None = None
     diagnosis: record_mod.Diagnosis | None = None
 
@@ -250,6 +265,10 @@ class _Drill:
     correct: bool | None = None
     min_hint_level: int = 0
     explanation: str | None = None
+    # The learner declared they had no method, rather than writing one. Kept
+    # apart from `explanation` because the text is a canned string and a later
+    # reader must not have to pattern-match on it to know what happened.
+    stuck: bool = False
     attempt_id: int | None = None
     briefing_text: str | None = None
     diagnosis: record_mod.Diagnosis | None = None
@@ -491,21 +510,15 @@ class DrillSession:
         drill = self.store.get(token)
         verdict = None
         if drill.phase in (Phase.ANSWERED, Phase.EXPLAINED, Phase.BRIEFED):
-            verdict = Verdict(
-                correct=bool(drill.correct),
-                answer_key=drill.item["answer_key"],
-                answer_given=drill.answer_given or "",
-                min_hint_level=drill.min_hint_level,
-                competence=hints.competence_score(
-                    drill.min_hint_level, bool(drill.correct)
-                ),
-            )
+            verdict = self._verdict(drill)
         return DrillView(
             phase=drill.phase,
             served=self._serve(drill, drill.target_band),
             verdict=verdict,
             rungs_shown=[hints.rung(level) for level in drill.rungs_shown],
             explanation=drill.explanation,
+            rationale=drill.capture.rationale if drill.capture else None,
+            stuck=drill.stuck,
             attempt_id=drill.attempt_id,
             diagnosis=drill.diagnosis,
         )
@@ -526,6 +539,7 @@ class DrillSession:
             choice_values=grading.choice_values(
                 drill.choices, drill.item["answer_key"]
             ),
+            input_shape=grading.input_shape(drill.item["answer_key"]),
         )
 
     # -- phase 1 -----------------------------------------------------------
@@ -581,33 +595,59 @@ class DrillSession:
         drill.min_hint_level = max(drill.highest_rung_served, reported)
         drill.phase = Phase.ANSWERED
 
+        return self._verdict(drill)
+
+    def _verdict(self, drill: _Drill) -> Verdict:
+        """The verdict for an already-graded drill.
+
+        One builder for both callers -- `submit_answer` returns it once and
+        `view` rebuilds it on every refresh. Two copies drifted apart is how a
+        redrawn page ends up disagreeing with the page it redrew.
+        """
+        key = drill.item["answer_key"]
         return Verdict(
-            correct=drill.correct,
-            answer_key=drill.item["answer_key"],
-            answer_given=answer,
+            correct=bool(drill.correct),
+            answer_key=key,
+            answer_given=drill.answer_given or "",
             min_hint_level=drill.min_hint_level,
-            competence=hints.competence_score(drill.min_hint_level, drill.correct),
+            competence=hints.competence_score(
+                drill.min_hint_level, bool(drill.correct)
+            ),
+            choice_marks=grading.mark_choices(
+                grading.choice_values(drill.choices, key), key, drill.answer_given
+            ),
         )
 
-    def submit_explain_back(self, token: str, text: str) -> explain_back.GateResult:
+    def submit_explain_back(
+        self, token: str, text: str, stuck: bool = False
+    ) -> explain_back.GateResult:
         """The gate. Nothing is persisted until it passes, and it has no skip.
 
         A failed gate leaves the drill in `ANSWERED`, so the caller loops. The
         only way past is a well-formed explanation, which is the mechanism
         rather than an obstacle in front of it (DESIGN.md principle 10).
+
+        `stuck` is the learner declaring they do not know where to start. It is
+        not the skip this method refuses to grow: the attempt is recorded, the
+        declaration is stored where the path would go, and the briefing asks
+        the reader to teach rather than to diagnose. See `pedagogy/explain_back`
+        for why that is a stronger signal than a path the learner invented to
+        satisfy a word count.
         """
         drill = self.store.get(token)
         self._require(drill, Phase.ANSWERED)
 
-        # The verdict picks the floor: a justification for an answer that
-        # already worked is allowed to be short (pedagogy/explain_back).
-        gate = explain_back.check(text, bool(drill.correct))
+        gate = explain_back.check(text, bool(drill.correct), stuck)
         if not gate.passed:
             return gate
 
-        drill.explanation = text.strip()
+        drill.stuck = stuck
+        drill.explanation = (
+            explain_back.STUCK_DECLARATION if stuck else text.strip()
+        )
         cap_row = drill.capture.as_row()  # type: ignore[union-attr]
         cap_row["answer_given"] = drill.answer_given
+        cap_row["stuck"] = stuck
         drill.attempt_id = db.record_attempt(
             self.conn,
             self.learner,
@@ -656,6 +696,7 @@ class DrillSession:
             answer_given=drill.answer_given,
             correct=bool(drill.correct),
             min_hint_level=drill.min_hint_level,
+            stuck=drill.stuck,
         )
         text = briefing_mod.render(b_item, b_cap)
         text += f"\n\n--- LEARNER'S EXPLAIN-BACK ---\n{drill.explanation}\n"
