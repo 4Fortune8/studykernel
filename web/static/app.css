@@ -217,3 +217,19 @@ button.ghost { border-color: var(--rule); color: var(--muted); }
 
 .diagnosis { border: 1px solid var(--accent); border-radius: 6px; padding: 1rem 1.2rem; }
 .one-fix { font-size: 1.05rem; }
+
+/* KaTeX sits inside serif prose; nudge it so rendered maths does not tower
+   over the sentence around it. */
+.katex { font-size: 1.05em; }
+.stem .katex-display, .passage-text .katex-display { margin: 0.7em 0; }
+/* Long displayed equations scroll rather than widening the page. */
+.katex-display { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+
+.key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.key .katex { font-size: 1em; }

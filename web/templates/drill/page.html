@@ -14,15 +14,18 @@
        the four reasons this UI exists. #}
     <aside class="passage">
       <h2>Passage</h2>
-      <div class="passage-text">{{ served.passage }}</div>
+      <div class="passage-text math">{{ served.passage }}</div>
     </aside>
   {% endif %}
 
   <div class="item">
-    <div class="stem">{{ served.stem }}</div>
+    <div class="stem math">{{ served.stem }}</div>
     {% if served.choices %}
-      <ol class="choices" type="A">
-        {% for choice in served.choices %}<li>{{ choice }}</li>{% endfor %}
+      <ol class="choices math" type="A">
+        {# `delimit_math` only wraps expressions that carry no delimiters of
+           their own -- MMLU stores `\frac{7}{9}` bare, and auto-render cannot
+           find what is not marked. See web/mathtext.py. #}
+        {% for choice in served.choices %}<li>{{ choice|delimit_math }}</li>{% endfor %}
       </ol>
     {% endif %}
 
@@ -51,4 +54,7 @@
 </div>
 
 <script src="/static/vendor/htmx.min.js"></script>
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/katex/auto-render.min.js"></script>
+<script src="/static/render-math.js"></script>
 {% endblock %}

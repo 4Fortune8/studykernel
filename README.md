@@ -24,8 +24,9 @@ kernel/          installable package; contains no exam names (CI-enforced)
   cli.py         the terminal adapter
 web/             the local web adapter (FastAPI); same purity rule as kernel/
   app.py         routes + the single-worker entry point
+  mathtext.py    which of a corpus's many shapes is actually mathematics
   templates/     Jinja2, drill/ holds the three phases as partials
-  static/        one CSS file + vendored htmx (KaTeX will live here)
+  static/        one CSS file + vendored htmx and KaTeX (offline, no CDN)
 products/
   tsi-ready/     Product 1: threshold objective, seeded taxonomy
   gre-forge/     Product 2 sketch: deadline(maximize), learned DAG
@@ -103,8 +104,11 @@ explain-back gate, then the briefing and paste-back panel with inline
 validation. Phase lives on the server, so refreshing redraws where you are
 instead of replaying a step.
 
-Still missing: bundled KaTeX, so LaTeX-heavy math items render as source; and
-the `Report` page. Both are WEB_UI.md phase 1.
+Math renders through bundled KaTeX — vendored, woff2 only, no network at
+runtime. MMLU stores some choices as bare `\frac{7}{9}` with no delimiters, so
+those are wrapped at render time; nothing stored is rewritten.
+
+Still missing: the `Report` page, the last item in WEB_UI.md phase 1.
 
 `study-web` runs a single uvicorn worker and there is no flag to change that.
 In-progress drills live in an in-process dict, so a second worker would fail

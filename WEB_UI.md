@@ -319,8 +319,7 @@ HANDOFF.md §6.
 - [x] Drill flow, three phases, with the §4.1 key-absence test in the suite
 - [x] Observed `min_hint_level` (§4.2)
 - [x] Exchange panel with inline validation
-- [ ] Bundled KaTeX — **the last thing standing between this and being usable
-      for math.** ~3,000 LaTeX-dense items currently render as source.
+- [x] Bundled KaTeX (0.16.22, woff2 only, 604 KB, no network at runtime)
 - [ ] `Report` page, CLI parity
 
 **Phase 2 — the reading half.**

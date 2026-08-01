@@ -31,10 +31,12 @@ from kernel.exchange import record as record_mod
 from kernel.pedagogy import capture as capture_mod
 from kernel.session import UnknownDrill
 from kernel.storage import db
-from web import deps
+from web import deps, mathtext
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
+# Presentation only -- see web/mathtext.py. Nothing stored is rewritten.
+templates.env.filters["delimit_math"] = mathtext.delimit
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

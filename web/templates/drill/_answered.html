@@ -8,8 +8,9 @@
     {{ "Correct" if view.verdict.correct else "Wrong" }}
   </h2>
   <p>
-    Key: <code>{{ view.verdict.answer_key }}</code>
-    &nbsp;·&nbsp; you answered <code>{{ view.verdict.answer_given }}</code>
+    Key: <span class="math key">{{ view.verdict.answer_key|delimit_math }}</span>
+    &nbsp;·&nbsp; you answered
+    <span class="math key">{{ view.verdict.answer_given|delimit_math }}</span>
   </p>
   <p class="note">
     Lowest hint level needed: <strong>L{{ view.verdict.min_hint_level }}</strong>

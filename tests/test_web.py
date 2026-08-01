@@ -125,13 +125,24 @@ def start_drill(client) -> str:
     return response.headers["location"].rsplit("/", 1)[1]
 
 
+CHOICE_LIST = re.compile(r'<ol[^>]*\bclass="[^"]*\bchoices\b[^"]*"[^>]*>.*?</ol>', re.S)
+
+
 def without_choices(html: str) -> str:
     """The page minus the rendered choice list.
 
     The keyed string legitimately appears there, as one option among four --
     that is the item. Everywhere else is a leak.
+
+    Matched loosely on the class attribute on purpose: an earlier version
+    anchored on `class="choices"` exactly and silently stopped stripping
+    anything the moment a second class was added, turning the leak test into
+    a test that fails on markup changes. A safety test that cries wolf gets
+    muted, which is the one outcome this test cannot afford.
     """
-    return re.sub(r'<ol class="choices".*?</ol>', "", html, flags=re.S)
+    stripped = CHOICE_LIST.sub("", html)
+    assert stripped != html, "choice list not found -- the strip pattern is stale"
+    return stripped
 
 
 # ------------------------------------------------- §4.1 the key is not sent

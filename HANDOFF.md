@@ -334,10 +334,53 @@ first time it was pointed at a copy of the real `study.db`.
 > **Run `study init` once against your real database** (or just start the web
 > app) if you have not since the profiles change. Additive and idempotent.
 
-Next: **bundled KaTeX**. It is the last item in phase 1 and the reason the UI
-exists at all — ~3,000 LaTeX-dense MATH items still render as source, so the
-browser is currently better than the terminal for reading (passages pinned)
-and no better for math. After that, the `Report` page.
+### KaTeX is bundled
+
+KaTeX 0.16.22 under `web/static/vendor/katex/` — 604 KB, **woff2 fonts only**
+(20 files), no network at runtime. The `.woff` and `.ttf` fallbacks were
+stripped from the stylesheet rather than shipped: every browser that will ever
+open this supports woff2, and a `url()` pointing at a file that is not in the
+wheel is a 404 waiting for whoever reads the network tab. Checked: all 20
+fonts the CSS references are present, and nothing else is referenced.
+
+**The corpus needed two different treatments, which is the non-obvious part.**
+
+| Source | How LaTeX is stored | Handled by |
+|---|---|---|
+| MATH, GSM8K stems | `$…$` (349 of a 400 sample), `$$…$$`, `\[…\]` | auto-render |
+| MMLU choices | **bare** — `\frac{7}{9}`, no delimiter at all (179 of 9,188) | `web/mathtext.py` |
+| RACE choices | prose, no LaTeX | left alone |
+
+auto-render cannot find what is not marked, so bare expressions are wrapped in
+`$…$` at render time by `mathtext.delimit`. Nothing stored changes —
+DATA_SOURCING_MATH.md §5.2's rule that items keep the source's bytes still
+holds, and grading still reads the raw value.
+
+The wrapping rule is deliberately conservative, because the two failures are
+not symmetric: an unrendered fraction is ugly, and a *sentence* rendered as
+mathematics is unanswerable. So it wraps only strings that contain a LaTeX
+command and, once commands are removed, contain no three-letter word.
+`tests/test_mathtext.py` is mostly the cases it must decline.
+
+Rendering is scoped to `.math` elements, never the document, because the
+briefing `<pre>` is copied verbatim into a chat client — rendering it would
+put HTML on the clipboard instead of the prompt. It re-runs on
+`htmx:afterSwap`, since swapped-in panels have never been through it.
+
+Verified three ways, because "does the maths render" is not something a unit
+test can answer:
+
+1. `katex.renderToString` in node against seven real corpus expressions —
+   7/7, and a deliberately malformed one degrades to error-coloured source
+   instead of throwing (`throwOnError: false`).
+2. Headless chromium over five real MATH stems and the MMLU bare fractions:
+   **11 rendered spans, 0 errors**, every leftover `\frac` accounted for
+   inside KaTeX's own TeX annotation, prose choice untouched, briefing `<pre>`
+   left raw.
+3. Server log during that render: **zero 404s**, three woff2 fonts fetched,
+   no `.woff` or `.ttf` requested.
+
+Next: the `Report` page, the last item in phase 1.
 
 ### Priority (2026-08-01)
 
