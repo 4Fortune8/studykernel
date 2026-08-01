@@ -139,6 +139,23 @@ Two rules the merged form has to keep:
   this section. Returning the whole parallel list, never a per-choice verdict,
   is what keeps that safe: "this pack keys by letter" is not a fact about
   which letter is right.
+- **A numeric item gets a box that will not take letters.** The same rule one
+  step further out: the way a right answer gets typed wrong on a free-response
+  item is that the learner solves for *N*, gets 13, and submits `N`. That is
+  not a failure of the mathematics, and an attempt marked failed for it is the
+  same false signal a mistyped letter would be. `grading.input_shape` reads the
+  *shape* of the key and returns a constant — `13`, `-0.5` and `\frac{1}{2}`
+  all yield `numeric` — so the box cannot be read backwards for the magnitude,
+  the sign, or even whether the answer is whole. The pattern admits everything
+  `grade` already reads, so the guard rail never rejects an answer that would
+  have been marked correct.
+
+  It is not information-free, and the trade is stated rather than hidden: a
+  numeric box does say "this answer is a number", which on a stem that could
+  have wanted an expression is a nudge the learner did not earn. That is worth
+  less than the false failures it removes. The browser check is a courtesy like
+  `required` above it — the server grades whatever arrives — and `study drill`
+  re-prompts on the same rule so the two front ends do not disagree.
 
 ### 4.2 Hint ladder — observed, not self-reported
 
@@ -168,18 +185,35 @@ gate. What *does* change on a hit is the question, because "explain it back"
 to someone who just answered correctly reads as a demand to justify themselves
 to a machine that already knows, and the honest reply is "I got it right":
 
-| verdict | the gate asks | floor |
+| verdict | the gate asks | how it is answered |
 |---|---|---|
-| wrong | the solution path — what you did, in order | 12 words |
-| correct | why the answer holds | 5 words |
+| wrong | the solution path — what you did, in order | typed, or the declaration below |
+| correct | whether the blind rationale *held* | the rationale, handed back to edit |
 
-The floors differ because the questions do. A path is a reconstruction and has
-a length; a justification often does not — "both sides are divisible by three"
-is six words and is a complete reason. Holding *that* to a word count measures
-typing, and invites the one failure mode that actually costs something here:
-padding. A learner writing filler to clear a counter is not articulating
-anything, which is the entire mechanism. Neither floor judges quality; that is
-settled in the exchange, by a reader who has the item.
+**On a hit the gate does not re-ask.** "Why is your answer right?" is the blind
+capture's own wording, written minutes earlier; asking for it again produced
+the same sentence twice and taught the learner that the box does not read what
+they typed. So the rationale is handed back pre-filled and the question becomes
+whether it held — which is the one thing the verdict just created and no other
+field on the page can show: right answer, wrong reason.
+
+**On a miss, "I don't know where to start" is an answer, not an escape.** The
+mechanism only works on a learner who *had* a method. Demanding a path from one
+who had none yields a fabrication, and a fabricated path is worse than silence
+because the briefing reads it as real reasoning and diagnoses a divergence that
+never happened. The declaration is a second submit button on the same form: it
+records the attempt, sets `attempts.stuck`, and makes the briefing ask for a
+lesson from first principles instead of a correction. That is escalation, which
+is the opposite of a skip — and it is why `explain_back` can still refuse to
+grow one.
+
+The word floor is **3, both ways**. It was 12 after a miss and 5 after a hit, on
+the theory that a reconstructed path has a length. It does — but a word count
+cannot tell a real path from a padded one, and the learner who pads is exactly
+the learner the count was aimed at. What the floor actually buys is rejecting
+empty and one-word submissions, and 3 buys that. Everything above it was
+friction on the diagnostic loop, which principle 10 calls fatal. The floor never
+judged quality; that is settled in the exchange, by a reader who has the item.
 
 The one thing the UI must *not* do is add DRM. DESIGN.md §10's honesty
 tradeoff stands: a determined user can self-report L1 after reading the
@@ -193,6 +227,23 @@ learner does with it.
 `kernel.pedagogy.grading` runs on the server. The browser cannot grade because
 it does not have the key until after grading has happened. This falls out of
 §4.1 for free, which is a sign §4.1 is the right constraint.
+
+**The options stay on the page past the answer form, marked.** "Key: C — you
+answered B" is two bare letters once the radios are gone, and the moment a
+learner most wants to see C and B side by side is the moment they got it
+wrong. Which option is the key and which was chosen is `grading.mark_choices`,
+not a template comparing strings: matching an option to the key *is* answer
+matching, and a template doing its own would miss the normalization and then
+contradict the verdict printed beside it.
+
+The options are drawn once, in `drill/_choices.html`, from the phase on the
+view — so the presented phase suppresses them (the radios are the same four
+options, and printing both makes the learner check whether the two lists
+agree) and every later phase shows them marked. They sit above `#panel`, which
+every answer targets, so `drill/_swap.html` re-emits them out of band on every
+panel response. Without that they would vanish with the answer form and not
+return until a manual refresh — a swap and a refresh disagreeing about the
+same phase is the bug class §4.3's server-side phase exists to prevent.
 
 ### 4.5 The exchange, with the ergonomics fixed
 
@@ -231,7 +282,11 @@ HTMX swaps a single panel; no client-side routing, no state machine in JS.
 1. **Present + capture.** Passage (if any) pinned left, item right. KaTeX on
    stem and choices. Capture fields come from `capture.active_fields(product)`
    — `verification_method` appears for products that enable it and is absent
-   for those that do not, with no UI branch of its own.
+   for those that do not, with no UI branch of its own. It renders as a
+   checkbox group over `capture.VERIFICATION_METHODS`, each option carrying
+   its explanation on hover and on keyboard focus; below the pointer
+   breakpoint the explanations are always shown in flow, because a hover
+   tooltip on a touch screen is an explanation nobody can read.
 2. **Answer + verdict.** Answer, then server grades, then verdict. Hint rungs
    requestable throughout phase 1–2. Then the explain-back gate.
 3. **Exchange.** Briefing panel, copy, paste, inline validation, one fix shown

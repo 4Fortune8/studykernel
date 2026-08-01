@@ -48,6 +48,12 @@ LATE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("learners", "display_name", "TEXT"),
     ("attempts", "tag_slug", "TEXT"),
     ("attempts", "exchange_waived_at", "TEXT"),
+    # No CHECK on the added column: SQLite's ALTER TABLE ADD COLUMN cannot
+    # carry one. The default covers every existing row, and `record_attempt`
+    # is the only writer.
+    ("attempts", "stuck", "INTEGER NOT NULL DEFAULT 0"),
+    ("diagnoses", "divergence", "TEXT"),
+    ("diagnoses", "explanation", "TEXT"),
 )
 
 
@@ -489,8 +495,8 @@ def record_attempt(
         """INSERT INTO attempts (learner_id, product_id, item_id, started_at,
                submitted_at, confidence, rationale, verification_method, answer_given,
                correct, min_hint_level, time_to_first_selection_ms, time_total_ms,
-               pass_number, rating_delta, resolved, tag_slug)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
+               pass_number, rating_delta, resolved, tag_slug, stuck)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
         (
             learner_id,
             product_id,
@@ -508,6 +514,7 @@ def record_attempt(
             capture.get("pass_number", 1),
             delta,
             tag_slug,
+            int(bool(capture.get("stuck"))),
         ),
     )
     attempt_id = int(cur.lastrowid)
@@ -558,12 +565,15 @@ def record_attempt(
 def record_diagnosis(conn: sqlite3.Connection, attempt_id: int, diagnosis: Any) -> None:
     conn.execute(
         """INSERT INTO diagnoses (attempt_id, error_code, prerequisite_gaps_json,
-                                  one_fix, trigger_miss, explain_back, explain_back_ok)
-           VALUES (?,?,?,?,?,?,?)
+                                  one_fix, divergence, explanation, trigger_miss,
+                                  explain_back, explain_back_ok)
+           VALUES (?,?,?,?,?,?,?,?,?)
            ON CONFLICT(attempt_id) DO UPDATE SET
              error_code=excluded.error_code,
              prerequisite_gaps_json=excluded.prerequisite_gaps_json,
-             one_fix=excluded.one_fix, trigger_miss=excluded.trigger_miss,
+             one_fix=excluded.one_fix, divergence=excluded.divergence,
+             explanation=excluded.explanation,
+             trigger_miss=excluded.trigger_miss,
              explain_back=excluded.explain_back,
              explain_back_ok=excluded.explain_back_ok""",
         (
@@ -571,6 +581,8 @@ def record_diagnosis(conn: sqlite3.Connection, attempt_id: int, diagnosis: Any) 
             diagnosis.error_code,
             json.dumps(diagnosis.prerequisite_gaps),
             diagnosis.one_fix,
+            getattr(diagnosis, "divergence", None),
+            getattr(diagnosis, "explanation", None),
             int(diagnosis.trigger_miss),
             getattr(diagnosis, "explain_back", None),
             None if diagnosis.explain_back_ok is None else int(diagnosis.explain_back_ok),

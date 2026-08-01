@@ -36,6 +36,18 @@ class Diagnosis:
     item_id: str
     error_code: str
     one_fix: str
+    # Where *this* attempt broke, in the learner's own words, or the standard
+    # "you didn't show your steps" sentence. Distinct from `one_fix`, which is
+    # the habit to change: a fix generalises and is what the learner carries to
+    # the next item, while this is the only output in the whole exchange that
+    # is about the line they actually wrote. Optional because the field is
+    # newer than the schema and old payloads must still record.
+    divergence: str | None = None
+    # The worked solution. Named against `explain_back` on the same record,
+    # which is the learner's: this one is the reader's. Bounded by the item's
+    # explanation policy, so on a `pinned_strict` or `anchored` item it is a
+    # restatement of official or quoted text rather than derived reasoning.
+    explanation: str | None = None
     prerequisite_gaps: list[str] = field(default_factory=list)
     trigger_miss: bool = False
     explain_back_ok: bool | None = None
@@ -108,10 +120,18 @@ def parse(
     if not isinstance(gaps, list):
         raise RecordError("prerequisite_gaps must be a list of tag slugs")
 
+    # Not required: a payload from an older prompt version has no such key, and
+    # rejecting it would make a prompt revision retroactively invalidate
+    # replies the learner already has in a chat window.
+    divergence = str(payload.get("divergence") or "").strip() or None
+    explanation = str(payload.get("explanation") or "").strip() or None
+
     return Diagnosis(
         item_id=returned_id,
         error_code=code,
         one_fix=one_fix,
+        divergence=divergence,
+        explanation=explanation,
         prerequisite_gaps=[str(g) for g in gaps],
         trigger_miss=bool(payload.get("trigger_miss", False)),
         explain_back_ok=_tri_state(payload.get("explain_back_ok")),

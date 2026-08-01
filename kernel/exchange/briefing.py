@@ -24,9 +24,16 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from kernel.pedagogy import capture as capture_mod
 from kernel.pedagogy import errors, hints
 
-PROMPT_VERSION = "v0.1-stub"
+# Bumped when the return contract changes, not when wording is tuned. v0.2
+# added `divergence`; a reply parsed under v0.1 has none, and this is what
+# lets a later reader tell "the model declined to locate it" from "the prompt
+# never asked".
+# v0.3 added `explanation`: the worked solution itself, which the protocol was
+# asking a reader to produce in prose and then throwing away with the prose.
+PROMPT_VERSION = "v0.3-stub"
 
 POLICY_INSTRUCTIONS: dict[str, str] = {
     "withheld": (
@@ -75,13 +82,38 @@ class BriefingCapture:
     min_hint_level: int
     time_total_ms: int | None = None
     time_median_ms: int | None = None
+    # The learner declared they had no method rather than writing one. Passed
+    # through because it changes the reader's job from correcting a path to
+    # teaching one, and because a reader told this will not invent a
+    # divergence out of a rationale that was a guess.
+    stuck: bool = False
 
+
+# What the reader must say when the learner's own work is too thin to locate a
+# divergence in. Stored and displayed verbatim, so the learner is told what to
+# do differently rather than being handed an empty field: the fix for "no steps
+# shown" is showing steps, and this is the only place the system can say so at
+# the moment it actually matters.
+NO_WORK_SHOWN = (
+    "You didn't show enough of your steps to find where this went wrong. "
+    "Write out what you actually did next time -- with the steps, this can "
+    "point at the exact line that broke."
+)
 
 RETURN_SCHEMA: dict[str, Any] = {
     "item_id": "<echo the item_id exactly>",
     "error_code": "<one code from the list above>",
+    "divergence": (
+        "<quote the first step in the learner's OWN work that is wrong, then "
+        "what it should have been -- or the exact NO WORK SHOWN sentence>"
+    ),
     "prerequisite_gaps": ["<tag slug>", "..."],
     "one_fix": "<a single actionable correction -- exactly one>",
+    "explanation": (
+        "<what was flawed in their thinking, then the bridge from what they did "
+        "to what they should have done, ending at the key -- complete enough "
+        "that no follow-up question is needed>"
+    ),
     "trigger_miss": False,
     "explain_back_ok": None,
     "explain_back_feedback": "<what the learner's own explanation got wrong, if anything>",
@@ -123,7 +155,21 @@ def render(
     parts.append(f"Confidence: {capture.confidence}")
     parts.append(f"Rationale: {capture.rationale}")
     if capture.verification_method:
-        parts.append(f"Verification method: {capture.verification_method}")
+        # The reader gets the labels, not the slugs, and gets the didn't-check
+        # case said out loud. On an untimed exam a wrong answer that was never
+        # checked is a different lesson from a wrong answer that survived a
+        # check -- the first needs a checking habit, the second needs a better
+        # check -- and a tutor handed "none" alone will not draw that line.
+        methods = capture_mod.describe_verification(capture.verification_method)
+        if capture.verification_method.strip() == capture_mod.NO_CHECK:
+            parts.append(
+                "Verification: NONE -- the learner submitted without checking. "
+                "This exam is untimed, so checking was free. If the error was "
+                "one a check would have caught, say which check and why it was "
+                "the one to run here."
+            )
+        else:
+            parts.append(f"Verification method: {methods}")
     parts.append(f"Answer given: {capture.answer_given}  ->  " f"{'CORRECT' if capture.correct else 'WRONG'}")
     parts.append(
         f"Lowest hint level needed: L{capture.min_hint_level} "
@@ -136,14 +182,52 @@ def render(
             f"{capture.time_median_ms / 1000:.0f}s ({ratio:.1f}x)"
         )
 
+    if capture.stuck:
+        parts.append(
+            "\nThe learner stated they did not know where to start. There is no "
+            "solution path of theirs to correct. Teach this item from the "
+            "beginning -- first move first, and why that move -- and set "
+            '"divergence" to the NO WORK SHOWN sentence below.'
+        )
+
     parts.append("\n--- YOUR TASK ---")
     parts.append(
-        "1. Compare the learner's rationale to the actual solution and name where "
-        "they diverge.\n"
+        "1. Find the DIVERGENCE: the first step in the learner's own work -- their "
+        "rationale above, and their explain-back below -- that is actually wrong. "
+        "Quote their words, then give the corrected step. Point at the line that "
+        "broke, not at the topic. One or two sentences: this locates the break, "
+        "item 4 walks the route out of it, and item 3 says what habit to change "
+        "-- write each of the three once, in its own field.\n"
+        "   If they showed no steps to locate it in -- a bare answer, a restatement, "
+        "or a declaration that they did not know where to start -- do not guess at "
+        "reasoning they did not write, and do not use a quote to stand in for one. "
+        'Return this sentence verbatim as "divergence":\n'
+        f"   {NO_WORK_SHOWN}\n"
         "2. Classify the error using exactly one code:\n"
         f"{product_error_codes or errors.describe()}\n"
         "3. Give ONE fix. Not five. The single highest-leverage correction.\n"
-        "4. If the learner's explain-back is included below, say whether it is sound."
+        "4. Write the EXPLANATION, addressed to the learner and built on the "
+        "reasoning they actually gave -- not a solution written as though they "
+        "had said nothing. Two things, in one pass:\n"
+        "   (a) What is flawed in their thinking. Name the belief or the move "
+        "that is wrong, not the topic it belongs to. If they were right for the "
+        "wrong reason, that is the flaw and it is worth more than the mark.\n"
+        "   (b) The bridge from what they did to what they should have done: the "
+        "steps that carry their starting point to the keyed answer, in order, "
+        "each one named. Where 3 above says what habit to change, this says how "
+        "the item is actually done.\n"
+        "   Write it so that nothing is left for a follow-up question. If the "
+        "reader would have to ask 'but why?' at any step, that step is not "
+        "finished. Do not stop at the correct answer -- stop when the route to "
+        "it is walkable.\n"
+        "   Where the learner gave no usable reasoning to bridge from, teach the "
+        "item from the first move instead, and say why that move is first.\n"
+        "   This is bounded by the EXPLANATION POLICY at the top -- it is the "
+        "reasoning that policy permits, said to the learner, not a licence to go "
+        "past it. Under pinned or pinned_strict, unpack the official text and do "
+        "not derive your own. Under anchored, every step is a verbatim quote or "
+        "it does not appear.\n"
+        "5. If the learner's explain-back is included below, say whether it is sound."
     )
     parts.append(
         "\nReturn ONLY this JSON block, fenced, with no prose after it:\n"

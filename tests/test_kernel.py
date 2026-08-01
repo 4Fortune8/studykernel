@@ -14,7 +14,7 @@ from kernel.objectives import base as objective_base
 from kernel.objectives import routes
 from kernel.objectives.threshold import ThresholdObjective
 from kernel.pedagogy import dag, errors, grading, hints
-from kernel.exchange import record
+from kernel.exchange import briefing, record
 from kernel.state import glicko2, reliability, variables
 from kernel.state.view import Estimate, StateView, TagState
 
@@ -335,6 +335,40 @@ def test_an_item_without_a_key_cannot_be_graded():
     assert not grading.is_gradable("")
 
 
+def test_marking_the_options_follows_the_pack_the_key_uses():
+    """Letter-keyed and text-keyed packs both have to mark the same option.
+
+    `choice_values` already decides which form this item grades in; marking
+    reuses it rather than comparing the raw strings, because a template doing
+    its own matching would disagree with the verdict printed beside it.
+    """
+    choices = ["alpha", "beta", "gamma", "delta"]
+
+    by_letter = grading.choice_values(choices, "C")
+    assert grading.mark_choices(by_letter, "C", "A") == [
+        grading.GIVEN, None, grading.KEY, None
+    ]
+
+    by_text = grading.choice_values(choices, "gamma")
+    assert grading.mark_choices(by_text, "gamma", "alpha") == [
+        grading.GIVEN, None, grading.KEY, None
+    ]
+
+
+def test_a_correct_answer_marks_one_option_both_not_two_options_once():
+    assert grading.mark_choices(["A", "B"], "b", "B") == [None, grading.BOTH]
+
+
+def test_marking_survives_an_answer_that_matches_no_option():
+    """A free-text answer on a selectable item still has to render a key.
+
+    Returning early or raising would blank the whole list, which is the case
+    it exists to serve.
+    """
+    assert grading.mark_choices(["A", "B"], "A", "banana") == [grading.KEY, None]
+    assert grading.mark_choices(None, "A", "A") == []
+
+
 # ---------------------------------------------------------------- exchange
 
 
@@ -353,6 +387,172 @@ def test_valid_payload_parses():
     diagnosis = record.parse(payload, "abc")
     assert diagnosis.error_code == "execution_error"
     assert diagnosis.explain_back_ok is None  # not judged is not rejected
+
+
+def _briefing_item(**overrides):
+    fields = dict(
+        item_id="abc",
+        stem="Solve for x.",
+        choices=None,
+        answer_key="-4",
+        official_expl=None,
+        passage=None,
+        section_slug="math",
+        explanation_policy="withheld",
+        tags=["signed-arithmetic"],
+    )
+    fields.update(overrides)
+    return briefing.BriefingItem(**fields)
+
+
+def _briefing_capture(**overrides):
+    fields = dict(
+        confidence=2,
+        rationale="Subtracted the smaller from the larger.",
+        verification_method=None,
+        answer_given="4",
+        correct=False,
+        min_hint_level=0,
+    )
+    fields.update(overrides)
+    return briefing.BriefingCapture(**fields)
+
+
+def test_the_divergence_survives_the_round_trip():
+    """The briefing already asked for it; before v0.2 there was nowhere to put it.
+
+    `one_fix` is the habit to change and generalises past this item. The
+    divergence is the line the learner actually wrote and got wrong, and it is
+    the thing they came back to find out -- so it needs its own field rather
+    than being folded into the fix or discarded.
+    """
+    payload = (
+        '{"item_id": "abc", "error_code": "execution_error", '
+        '"divergence": "You wrote 17 - 21 = 4; it is -4.", '
+        '"one_fix": "keep track of negative signs"}'
+    )
+    diagnosis = record.parse(payload, "abc")
+    assert diagnosis.divergence == "You wrote 17 - 21 = 4; it is -4."
+
+
+def test_the_worked_explanation_survives_the_round_trip():
+    payload = (
+        '{"item_id": "abc", "error_code": "knowledge_gap", '
+        '"one_fix": "distinguish domain from range", '
+        '"explanation": "Multiplying the outside by 3 triples the range to [-3, 3]; '
+        'the domain is unchanged because any real number is still a valid input."}'
+    )
+    diagnosis = record.parse(payload, "abc")
+    assert diagnosis.explanation.startswith("Multiplying the outside by 3")
+
+
+def test_the_explanation_is_asked_for_as_a_bridge_not_a_worked_solution():
+    """It has to replace the "explain this" follow-up, in one pass.
+
+    A detached worked solution does not: it answers the item while leaving the
+    learner to map it onto what they actually thought, which is the step they
+    were sending a second prompt to get. So the field is specified as the flaw
+    in their reasoning plus the route from it to the key.
+    """
+    text = briefing.render(_briefing_item(), _briefing_capture())
+    assert "built on the reasoning they actually gave" in text
+    assert "What is flawed in their thinking" in text
+    assert "bridge from what they did to what they should have done" in text
+    assert "nothing is left for a follow-up question" in text
+
+
+def test_the_three_diagnosis_fields_are_told_apart_in_the_prompt():
+    """`divergence`, `one_fix` and `explanation` must not restate each other.
+
+    They are adjacent by design -- where it broke, what habit to change, how
+    the item is done -- and adjacent fields are how a return payload turns into
+    the same paragraph three times.
+    """
+    text = briefing.render(_briefing_item(), _briefing_capture())
+    assert "write each of the three once, in its own field" in text
+    assert "Where 3 above says what habit to change, this says how the item" in text
+
+
+def test_the_worked_explanation_is_bounded_by_the_explanation_policy():
+    """The new field must not become a hole in the ELAR guardrail.
+
+    DATA_SOURCING_ELAR.md §2.4: on reading comprehension, fluent-but-false
+    justification teaches false reasoning, so `anchored` and `pinned_strict`
+    forbid derived reasoning. An instruction to "explain step by step" that did
+    not say so would license exactly that, and would read as the later, more
+    specific instruction while doing it.
+    """
+    strict = briefing.render(
+        _briefing_item(explanation_policy="pinned_strict", official_expl="Because."),
+        _briefing_capture(),
+    )
+    assert "bounded by the EXPLANATION POLICY" in strict
+    assert "do not derive your own" in strict
+    assert "Under anchored, every step is a verbatim quote" in strict
+
+
+def test_a_payload_without_a_divergence_still_records():
+    """A reply from a pre-v0.2 prompt is stale, not invalid.
+
+    Rejecting it would make a prompt revision retroactively invalidate replies
+    already sitting in the learner's chat window.
+    """
+    payload = '{"item_id": "abc", "error_code": "misread", "one_fix": "read the qualifier"}'
+    assert record.parse(payload, "abc").divergence is None
+
+
+def test_the_briefing_names_the_no_work_sentence_it_expects_back():
+    """The "show your steps" instruction has to reach the learner verbatim.
+
+    It is the one output that tells them what to do differently *before* the
+    next attempt, so the reader is given the exact sentence rather than asked
+    to improvise one -- and the prompt and the display must not drift apart.
+    """
+    text = briefing.render(_briefing_item(), _briefing_capture())
+    assert briefing.NO_WORK_SHOWN in text
+    assert '"divergence"' in text
+
+
+def test_a_stuck_briefing_asks_for_a_lesson_not_a_correction():
+    """With no path of the learner's to correct, there is nothing to diverge from.
+
+    Left unsaid, a reader would mine the blind rationale -- which on a stuck
+    attempt was a guess -- and diagnose reasoning the learner never used.
+    """
+    text = briefing.render(_briefing_item(), _briefing_capture(stuck=True))
+    assert "did not know where to start" in text
+    assert "Teach this item from the beginning" in text
+
+
+def test_the_briefing_names_the_verification_methods_in_prose():
+    """The reader gets labels, not the slugs the checkboxes post."""
+    text = briefing.render(
+        _briefing_item(),
+        _briefing_capture(verification_method="back_substitution,unit_check"),
+    )
+    assert "Back-substitution, Units and form" in text
+    assert "back_substitution" not in text
+
+
+def test_an_unchecked_answer_is_said_out_loud_to_the_reader():
+    """"Verification: none" is a different lesson from a check that missed.
+
+    Untimed means checking was free, so the tutor is told to name the check
+    that would have caught it rather than treat the miss as bad luck.
+    """
+    text = briefing.render(
+        _briefing_item(), _briefing_capture(verification_method="none")
+    )
+    assert "Verification: NONE" in text
+    assert "untimed" in text
+
+
+def test_a_briefing_still_renders_free_text_written_before_the_field_closed():
+    """Rows predate the closed set. They stay readable rather than blowing up."""
+    text = briefing.render(
+        _briefing_item(), _briefing_capture(verification_method="wowowowowow")
+    )
+    assert "wowowowowow" in text
 
 
 def test_a_list_of_fixes_is_rejected():

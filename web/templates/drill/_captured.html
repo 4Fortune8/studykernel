@@ -17,6 +17,12 @@
             <span class="math">{{ served.choices[loop.index0]|delimit_math }}</span>
           </label>
         {% endfor %}
+      {% elif served.input_shape == "numeric" %}
+        {# The same guard rail as the merged form -- see drill/_presented.html. #}
+        <input name="answer" autocomplete="off" autofocus required
+               pattern="{{ numeric_answer_pattern }}"
+               title="This one wants the number itself — digits, a decimal, or a fraction like 1/2. Not the letter you named it.">
+        <p class="note">The number, not the variable you called it.</p>
       {% else %}
         <input name="answer" autocomplete="off" autofocus required>
       {% endif %}

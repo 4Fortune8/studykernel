@@ -37,6 +37,17 @@ CORE_CODES: tuple[ErrorCode, ...] = (
 
 CORE_CODE_NAMES = frozenset(c.code for c in CORE_CODES)
 
+# The codes a check catches. Not the codes that are *bad* -- `knowledge_gap`
+# is worse and no amount of checking finds it, because you cannot verify your
+# way to a rule you never knew. These two are the ones where the learner had
+# the right approach and lost the item anyway, which is exactly what
+# re-reading the stem or back-substituting is for.
+#
+# Lives here rather than in the report because it is a claim about the
+# taxonomy, not about presentation: whoever adds a code has to decide whether
+# a check would have caught it, and this is where they will be looking.
+CHECKABLE_CODES = frozenset({"execution_error", "misread"})
+
 # Neutral default. A product that does not override these is telling the
 # allocator every error type costs the same, which is almost never true.
 DEFAULT_WEIGHT = 1.0

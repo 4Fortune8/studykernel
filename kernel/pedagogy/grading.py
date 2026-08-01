@@ -104,6 +104,79 @@ def choice_values(choices: list[str] | None, key: str | None) -> list[str] | Non
     return None
 
 
+# How a single option relates to the verdict, for a front end to mark it with.
+KEY = "key"
+GIVEN = "given"
+BOTH = "both"
+
+
+def mark_choices(
+    values: list[str] | None, key: str | None, given: str | None
+) -> list[str | None]:
+    """Label each option `KEY`, `GIVEN`, `BOTH`, or `None`, in order.
+
+    Computed here and not in a template because deciding whether an option
+    *is* the key is answer matching, and answer matching is this module's job.
+    A template comparing strings would miss the normalization -- a key of
+    `"c"`, or an option keyed by text with different spacing -- and would then
+    disagree with the verdict printed directly beside it. Two contradictory
+    accounts of the same attempt on one screen is worse than showing neither.
+
+    `values` is `choice_values` output, so the comparison is against whatever
+    form this item's grader actually recognises.
+    """
+    marks: list[str | None] = []
+    for value in values or []:
+        is_key = grade(value, key)
+        is_given = bool(given) and grade(value, given)
+        if is_key and is_given:
+            marks.append(BOTH)
+        elif is_key:
+            marks.append(KEY)
+        elif is_given:
+            marks.append(GIVEN)
+        else:
+            marks.append(None)
+    return marks
+
+
+NUMERIC = "numeric"
+
+# What a numeric answer box will accept. Written to admit everything `grade`
+# can already read -- integers, decimals, leading-dot decimals, thousands
+# commas, a sign, `a/b`, `\frac{a}{b}`, and the `$`/`%` wrappers
+# `normalize_answer` strips -- so the guard rail never rejects an answer that
+# would have been marked correct. What it excludes is letters, which is the
+# only way a right answer gets typed wrong here: writing back the variable you
+# solved for instead of the value you solved it to.
+_NUM = r"[+\-]?[\d,]*\.?\d+"
+_TEX_FRAC = rf"\\[dt]?frac\s*\{{\s*{_NUM}\s*\}}\s*\{{\s*{_NUM}\s*\}}"
+NUMERIC_INPUT_PATTERN = (
+    rf"\s*\$?\s*(?:[+\-](?!\s*[+\-])\s*)?(?:{_TEX_FRAC}|{_NUM}(?:\s*/\s*{_NUM})?)\s*\\?%?\.?\s*"
+)
+
+
+def input_shape(key: str | None) -> str | None:
+    """What kind of box this item's answer fits in. `None` means any box.
+
+    The same §4.1 argument as `choice_values`, and the same limit on it. This
+    reads the key's *shape* and returns a constant, never a value: `13`, `-0.5`
+    and `\\frac{1}{2}` all yield `NUMERIC`, so the box cannot be read backwards
+    for the magnitude, the sign, or even whether the answer is a whole number.
+
+    It is not free of information -- a numeric box does say "this answer is a
+    number", which for a stem that could have wanted an expression is a nudge
+    the learner did not earn. That is the trade being made, and it is made
+    deliberately: an item marked failed because the learner typed `N` when they
+    had already worked out `N = 13` is a false signal in the competence data,
+    and false signals cost more than the nudge does.
+    """
+    text = normalize_answer(key)
+    if not text:
+        return None
+    return NUMERIC if _as_number(text) is not None else None
+
+
 def is_gradable(key: str | None) -> bool:
     """Whether an item can be graded deterministically at all.
 

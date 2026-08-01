@@ -152,7 +152,12 @@ Two entries deserve emphasis because v0.2 got them wrong:
 - **Capture fields are configurable.** `verification_method` (how did you check
   your answer before submitting?) exists because untimed exams make checking
   free and therefore trainable. It is meaningless under time pressure. The
-  kernel supports the field; the TSI product turns it on.
+  kernel supports the field; the TSI product turns it on. It is a **closed
+  set** (`capture.VERIFICATION_METHODS`), because the value of the field is
+  being countable and free text was not: the first 32 rows included "math",
+  "wowowowowow" and "Not sure what to put here". Every option carries an
+  explanation shown at the point of choosing — a closed set whose labels are
+  never read is ticked at random, and random ticks look like data.
 
 ---
 
@@ -291,8 +296,34 @@ Unchanged from v0.1/v0.2 in substance; restated as kernel invariants:
   highest-value minute in the loop and the step every other tool omits because
   it is friction. Mandatory after a *correct* answer too — that is the case it
   exists for, since correctness cannot distinguish L1 from L4. What changes on
-  a hit is only the question asked ("why does it hold" rather than "what did
-  you do") and the length expected of the reply; see WEB_UI.md §4.3.
+  a hit is only the question asked — the blind rationale is handed back and the
+  gate asks whether it *held*, rather than asking for it a second time. On a
+  miss, "I don't know where to start" is an accepted answer: it is recorded as
+  a declaration, it sets `attempts.stuck`, and it routes the exchange to a
+  lesson instead of a correction. Not a skip — a demanded path from a learner
+  who had no method is a fabrication, and a fabrication reaches the reader
+  looking like data. See WEB_UI.md §4.3.
+- **Divergence, not just a fix.** The exchange returns `divergence` alongside
+  `one_fix`: the first step in the learner's *own* work that is wrong, quoted,
+  with the corrected step. The fix is the habit to carry forward and
+  generalises past the item; the divergence is the line they actually wrote,
+  and it is what they came back to find out. When they showed no steps to
+  locate it in, the reader returns a fixed sentence saying so — the only point
+  in the loop where "show your work" can be said at the moment it would change
+  the next attempt.
+- **The explanation is a bridge, not a worked solution.** `explanation` returns
+  two things in one pass: what was flawed in the reasoning the learner actually
+  gave, and the route from what they did to what they should have done. A
+  detached solution — the item worked as though the learner had said nothing —
+  leaves them to map it onto their own thinking, which is exactly the step a
+  second "explain this" prompt was being sent to get. The measure is that no
+  follow-up question is left; three fields, said once each: `divergence` locates
+  the break, `one_fix` names the habit, `explanation` walks the route.
+  **Bounded by the item's explanation policy** — under `pinned_strict` it
+  unpacks the official text, under `anchored` every step is a verbatim quote. An
+  "explain step by step" instruction that did not say so would silently license
+  the derived reasoning §10 forbids on reading comprehension, and would do it
+  while reading as the more specific rule.
 - **Prerequisite DAG.** Seeded where an official taxonomy exists; learned from
   diagnosis `prerequisite_gaps` where it does not. Routing rule: ≥3 failures at
   L4+ stops the tag and serves its highest-confidence parents.
@@ -369,9 +400,15 @@ are *preventable*, so they are treated as unacceptable rather than noise:
 - `execution_error` and `misread` carry **elevated weights** in this product —
   counterintuitively higher than on the harder GRE, because on an item-adaptive
   CAT an error costs the item *plus* downward routing, with ~20 items of runway.
-- `verification_method` capture field is **on**: before submitting, state how
-  the answer was confirmed (back-substitution, magnitude estimate, re-read the
-  qualifier, unit check). Directly trainable; attacks the dominant error mode.
+- `verification_method` capture field is **on**: before submitting, tick how
+  the answer was confirmed, from a closed set (back-substitution, worked it
+  again, size check, units and form, re-read the question, checked the text)
+  — or tick **"I didn't check"**, which is the reading the report is actually
+  after. Directly trainable; attacks the dominant error mode. "Didn't check"
+  paired with a wrong answer coded `execution_error` or `misread` is the
+  preventable loss this product exists to remove, and is the only form of
+  this field a count can find, which is why the set is closed and why
+  admitting to no check is as cheap to say as any real method.
 - Time deltas are diagnostic only, measured against the learner's own median at
   that difficulty: well-below-median + wrong → didn't engage (the most fixable
   failure on an untimed test); `time_to_first_selection ≈ time_total` → not
@@ -465,7 +502,10 @@ architecture's one rule, and it will catch the drift the moment it happens.
   reliability_lo, variance_rolling)`
 - `items` + `rating, rating_deviation, n_attempts` (self-calibrating difficulty;
   hand labels demoted to priors)
-- `attempts` + `verification_method TEXT NULL` (product-gated capture field)
+- `attempts` + `verification_method TEXT NULL` (product-gated capture field;
+  comma-separated slugs from the closed set, in declaration order so equal
+  ticks produce equal strings. Rows written before the set closed hold free
+  text and stay readable)
 - `objective_state (exam_id, route_id, p_success, position_estimate, margin,
   satisfied, computed_at)` — position over time is itself a progress artifact
 - `error_code_weights (exam_id, code, weight)` — product data, not constants
@@ -482,7 +522,12 @@ architecture's one rule, and it will catch the drift the moment it happens.
 - [ ] Drill loop: capture (incl. `verification_method`) → grade → tutor
       briefing → record
 - [ ] Seed taxonomy from the published domains; ingest one OpenStax slice
-- [ ] Report: position estimate, per-route P(success), domain reliability table
+- [ ] Report: position estimate, per-route P(success), domain reliability table,
+      and the checking split — accuracy with and without a check, plus the count
+      of misses that were unchecked *and* coded `execution_error`/`misread`
+      (`errors.CHECKABLE_CODES`). That last number is the one that makes
+      `verification_method` worth its friction; the section is self-gating on
+      the presence of rows, so a product with the field off prints nothing.
 
 The failure mode remains sixty hours of building and ten of studying. Elo and
 the CI are ~50 lines combined; the threshold plugin is an expression evaluator.

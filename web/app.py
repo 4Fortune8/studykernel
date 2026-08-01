@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -36,6 +37,7 @@ from fastapi.templating import Jinja2Templates
 from kernel import config, session
 from kernel.exchange import record as record_mod
 from kernel.pedagogy import capture as capture_mod
+from kernel.pedagogy import grading
 from kernel.session import UnknownDrill
 from kernel.storage import db
 from web import deps, mathtext
@@ -44,6 +46,14 @@ HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 # Presentation only -- see web/mathtext.py. Nothing stored is rewritten.
 templates.env.filters["delimit_math"] = mathtext.delimit
+# The one regex a numeric answer box validates against. A global rather than a
+# field on `Served`, because it is the same string for every item -- putting it
+# on the served view would make it look like something derived from the key.
+templates.env.globals["numeric_answer_pattern"] = grading.NUMERIC_INPUT_PATTERN
+# The closed set behind the verification checkboxes. A global for the same
+# reason: it is product configuration that turns the *field* on or off, but
+# the methods themselves are the same list for every item that asks.
+templates.env.globals["verification_methods"] = capture_mod.VERIFICATION_METHODS
 
 
 @asynccontextmanager
@@ -232,13 +242,23 @@ def _panel(request: Request, drill: session.DrillSession, token: str, **extra):
     Phase comes from the server every time, so a refresh, a back button or a
     double-submit redraws the truth instead of replaying a step. The browser
     holds a token and nothing else.
+
+    Responses go out through `_swap.html`, which carries the phase partial plus
+    an out-of-band redraw of the options -- those live above `#panel` and would
+    otherwise never be updated by a swap that targets it. See `_choices.html`.
     """
     view = drill.view(token)
-    context = {"view": view, "served": view.served, "token": token, **extra}
+    context = {
+        "view": view,
+        "served": view.served,
+        "token": token,
+        "partial": f"drill/_{view.phase.value}.html",
+        **extra,
+    }
     if view.phase is session.Phase.BRIEFED or view.phase is session.Phase.EXPLAINED:
         context.setdefault("briefing", drill.briefing(token))
     return templates.TemplateResponse(
-        request=request, name=f"drill/_{view.phase.value}.html", context=context
+        request=request, name="drill/_swap.html", context=context
     )
 
 
@@ -329,7 +349,13 @@ async def drill_capture(request: Request, token: str) -> HTMLResponse:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
-        form = dict(await request.form())
+        posted = await request.form()
+        form: dict[str, Any] = dict(posted)
+        # A checkbox group posts the key once per ticked box, and `dict()`
+        # keeps only the last one. Re-read it as a list so both the kernel and
+        # a re-rendered form see every method the learner actually ticked.
+        if "verification_method" in form:
+            form["verification_method"] = posted.getlist("verification_method")
 
         answer = str(form.get("answer") or "")
         if not answer.strip():
@@ -374,15 +400,20 @@ async def drill_answer(request: Request, token: str, answer: str = Form("")) -> 
 
 @app.post("/drill/{token}/explain", response_class=HTMLResponse)
 async def drill_explain(
-    request: Request, token: str, explanation: str = Form("")
+    request: Request, token: str, explanation: str = Form(""), stuck: str = Form("")
 ) -> HTMLResponse:
-    """The gate. There is no skip route here and there is not meant to be one."""
+    """The gate. There is no skip route here and there is not meant to be one.
+
+    `stuck` is not one. It arrives from a second submit button on the same
+    form, it records an attempt like any other, and it makes the briefing ask
+    for a lesson rather than a correction -- see `pedagogy/explain_back`.
+    """
     conn = deps.connect()
     try:
         drill = _session(request, conn)
         if drill is None:
             return RedirectResponse("/profiles", status_code=303)
-        gate = drill.submit_explain_back(token, explanation)
+        gate = drill.submit_explain_back(token, explanation, stuck=bool(stuck))
         if not gate.passed:
             return _panel(request, drill, token, error=gate.reason, submitted={
                 "explanation": explanation

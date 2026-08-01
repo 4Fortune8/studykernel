@@ -137,15 +137,15 @@ def good_capture():
     return capture_mod.Capture(
         confidence=2,
         rationale="Adding eight and nine carries once past ten.",
-        verification_method="re-added the units",
+        verification_method="back_substitution,unit_check",
     )
 
 
-def advance_to_gate(drill):
+def advance_to_gate(drill, answer=SECRET_KEY):
     """Run a drill up to the explain-back gate. Returns (served, verdict)."""
     served = drill.start()
     drill.submit_capture(served.token, good_capture())
-    verdict = drill.submit_answer(served.token, SECRET_KEY)
+    verdict = drill.submit_answer(served.token, answer)
     return served, verdict
 
 
@@ -242,6 +242,29 @@ def test_the_gate_can_be_retried_and_then_records(drill, conn):
     long_enough = " ".join(["carried", "the", "ten", "then", "added"] * 4)
     assert drill.submit_explain_back(served.token, long_enough).passed is True
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+
+
+def test_not_knowing_where_to_start_passes_the_gate_and_is_recorded(drill, conn):
+    """Escalation, not evasion. See `pedagogy/explain_back.check`.
+
+    The learner who had no method has nothing to articulate, and demanding a
+    path from them yields a fabricated one -- which the briefing then reads as
+    their actual reasoning and diagnoses a divergence that never happened. So
+    the declaration passes, and it is stored as a declaration.
+    """
+    served, _ = advance_to_gate(drill, answer="wrong")
+    assert drill.submit_explain_back(served.token, "", stuck=True).passed is True
+
+    row = conn.execute("SELECT stuck FROM attempts").fetchone()
+    assert row["stuck"] == 1
+    assert explain_back.STUCK_DECLARATION in drill.briefing(served.token).text
+
+
+def test_the_gate_still_refuses_an_empty_explanation_without_the_declaration(drill, conn):
+    """The declaration has to be made, not merely implied by leaving it blank."""
+    served, _ = advance_to_gate(drill, answer="wrong")
+    assert drill.submit_explain_back(served.token, "   ").passed is False
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
 
 
 def test_no_method_takes_a_skip_flag():
@@ -602,7 +625,7 @@ def test_build_capture_coerces_front_end_strings(drill):
         {
             "confidence": " 3 ",
             "rationale": "  eight plus nine carries once  ",
-            "verification_method": "re-added",
+            "verification_method": ["unit_check", "back_substitution"],
         },
         served.capture_fields,
     )
@@ -616,6 +639,67 @@ def test_build_capture_leaves_a_non_numeric_confidence_unset(drill):
     assert cap.confidence is None
     with pytest.raises(capture_mod.CaptureError):
         capture_mod.validate(cap, served.capture_fields)
+
+
+def test_ticked_boxes_arrive_as_a_list_and_store_in_a_canonical_order(drill):
+    """Two learners who ticked the same boxes must produce the same string.
+
+    Otherwise the field is countable in principle and ungroupable in practice,
+    which is the free-text failure with extra steps.
+    """
+    served = drill.start()
+    one = session.build_capture(
+        {"verification_method": ["unit_check", "back_substitution"]},
+        served.capture_fields,
+    )
+    two = session.build_capture(
+        {"verification_method": ["back_substitution", "unit_check"]},
+        served.capture_fields,
+    )
+    assert one.verification_method == two.verification_method == "back_substitution,unit_check"
+
+
+def test_a_verification_method_off_the_list_is_rejected(drill):
+    served = drill.start()
+    cap = good_capture()
+    cap.verification_method = "vibes"
+    with pytest.raises(capture_mod.CaptureError, match="vibes"):
+        capture_mod.validate(cap, served.capture_fields)
+
+
+def test_not_checking_cannot_be_claimed_alongside_checking(drill):
+    served = drill.start()
+    cap = good_capture()
+    cap.verification_method = "none,unit_check"
+    with pytest.raises(capture_mod.CaptureError):
+        capture_mod.validate(cap, served.capture_fields)
+
+
+def test_not_checking_is_a_valid_answer_on_its_own(drill):
+    """The point of the field. If admitting it is harder than lying, it lies."""
+    served = drill.start()
+    cap = good_capture()
+    cap.verification_method = capture_mod.NO_CHECK
+    capture_mod.validate(cap, served.capture_fields)
+    verdict = drill.submit_capture(served.token, cap)
+    assert not isinstance(verdict, session.Starved)
+
+
+def test_an_untouched_checkbox_group_still_rejects_the_capture(drill):
+    """No box ticked posts no key at all -- it must not read as 'didn't check'."""
+    served = drill.start()
+    cap = session.build_capture(
+        {"confidence": "2", "rationale": "x" * 20}, served.capture_fields
+    )
+    assert cap.verification_method is None
+    with pytest.raises(capture_mod.CaptureError, match="didn't"):
+        capture_mod.validate(cap, served.capture_fields)
+
+
+def test_every_verification_method_carries_an_explanation():
+    """The detail text is load-bearing: unread options get ticked at random."""
+    for method in capture_mod.VERIFICATION_METHODS:
+        assert method.label and len(method.detail) > 30
 
 
 def test_the_passage_rides_along_with_the_item(drill):
