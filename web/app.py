@@ -1,7 +1,7 @@
 """FastAPI application. WEB_UI.md §3.
 
-Phase 1 is not built yet: what exists here is the skeleton, the profile
-switcher, and the two things that have to be right before any page is written.
+`Now`, the drill flow and profile switching. Three things about how this runs
+matter more than any individual route:
 
 1. **How the server starts.** `run()` hands `uvicorn.run` the application
    *object*, not the `"web.app:app"` import string. Uvicorn can only fork
@@ -11,7 +11,14 @@ switcher, and the two things that have to be right before any page is written.
    started on one is `UnknownDrill` on the other, roughly half the time, and
    the learner loses a blind capture they cannot honestly rewrite.
 
-2. **Losing a drill is a page, not a traceback.** A restart mid-drill is
+2. **It refuses to start pointed at nothing.** `STUDY_PRODUCT` and `STUDY_DB`
+   are relative by default, so they resolve against the launch directory.
+   Starting from the wrong one used to give a live server that 500ed on the
+   home page *and* created an empty database wherever it stood -- a blank
+   study history conjured by a `cd`. `deps.preflight()` now checks both before
+   the first request and names the resolved paths.
+
+3. **Losing a drill is a page, not a traceback.** A restart mid-drill is
    possible with one worker too, so `UnknownDrill` is handled and says what
    happened -- including that nothing was recorded.
 """
@@ -26,7 +33,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from kernel import session
+from kernel import config, session
 from kernel.exchange import record as record_mod
 from kernel.pedagogy import capture as capture_mod
 from kernel.session import UnknownDrill
@@ -38,6 +45,7 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 # Presentation only -- see web/mathtext.py. Nothing stored is rewritten.
 templates.env.filters["delimit_math"] = mathtext.delimit
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Run the migration once at boot rather than failing per request.
@@ -48,6 +56,7 @@ async def lifespan(_: FastAPI):
     tables and columns and rewrites nothing -- so running it here costs
     nothing and removes a footgun the user cannot diagnose from a 500.
     """
+    deps.preflight()
     conn = deps.connect()
     try:
         db.migrate(conn)
@@ -58,6 +67,22 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="studykernel", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
+
+
+@app.exception_handler(config.PackError)
+async def pack_broken(request: Request, exc: config.PackError) -> HTMLResponse:
+    """A pack edited out from under a running server, rather than a traceback.
+
+    `preflight()` catches the usual case at startup; this covers the pack
+    changing while the server is up, which happens whenever a product is
+    being edited in another window.
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="pack_error.html",
+        context={"detail": str(exc), "cwd": Path.cwd()},
+        status_code=500,
+    )
 
 
 @app.exception_handler(UnknownDrill)

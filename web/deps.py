@@ -20,7 +20,11 @@ PROFILE_COOKIE = "studykernel_profile"
 
 
 class NoProductConfigured(RuntimeError):
-    """Raised at startup when STUDY_PRODUCT is unset."""
+    """Raised at startup when the product pack is missing or unreadable."""
+
+
+class NoDatabase(RuntimeError):
+    """Raised at startup when STUDY_DB names a database that does not exist."""
 
 
 def product_dir() -> Path:
@@ -31,6 +35,40 @@ def product_dir() -> Path:
             "under products/, e.g. STUDY_PRODUCT=products/<pack> study-web"
         )
     return Path(configured)
+
+
+def preflight() -> None:
+    """Fail at startup, with the resolved paths, rather than on a page.
+
+    Both settings are relative by default, so they resolve against whatever
+    directory the server was launched from -- and launching from the wrong one
+    used to produce a running server that 500ed on the home page and, worse,
+    quietly created an empty database wherever it happened to be standing. A
+    study tool that invents a blank history because of a `cd` is a study tool
+    that loses your history, so this refuses to start instead.
+    """
+    pack = product_dir()
+    if not pack.is_dir():
+        raise NoProductConfigured(
+            f"no product pack at {pack.resolve()}\n"
+            f"  STUDY_PRODUCT = {pack}\n"
+            f"  working directory = {Path.cwd()}\n"
+            "STUDY_PRODUCT is relative unless you make it absolute, so this is "
+            "usually the wrong working directory. Run from the repository root "
+            "or give an absolute path."
+        )
+    load_product()  # surfaces a malformed pack here rather than per request
+
+    path = db_path()
+    if not path.exists():
+        raise NoDatabase(
+            f"no database at {path.resolve()}\n"
+            f"  STUDY_DB = {path}\n"
+            f"  working directory = {Path.cwd()}\n"
+            "Refusing to create one: an empty database here would look like a "
+            "learner who has never studied. Run `study init` first, or point "
+            "STUDY_DB at the database you meant."
+        )
 
 
 def load_product() -> dict[str, Any]:

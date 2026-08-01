@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Product pack unreadable &middot; studykernel{% endblock %}
+
+{% block content %}
+<h1>The product pack cannot be read</h1>
+<pre class="error-detail">{{ detail }}</pre>
+<p class="note">
+  Working directory: <code>{{ cwd }}</code>. <code>STUDY_PRODUCT</code> is a
+  relative path unless you make it absolute, so it resolves against wherever
+  the server was started — not against the repository.
+</p>
+<p class="note">
+  Nothing was recorded and nothing was changed. Fix the path or the pack and
+  restart.
+</p>
+{% endblock %}

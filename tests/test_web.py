@@ -378,3 +378,58 @@ def test_an_expired_token_is_a_page_not_a_traceback(client):
     response = client.get("/drill/not-a-real-token")
     assert response.status_code == 410
     assert "Nothing was recorded" in response.text
+
+
+# --------------------------------------------------- starting up wrong
+
+
+def test_a_missing_pack_stops_startup_and_names_the_paths(tmp_path, monkeypatch):
+    """The failure that actually happened: launched from the wrong directory.
+
+    `STUDY_PRODUCT` is relative, so it resolved against `web/` and the pack
+    was not there. The server started anyway and 500ed on the home page,
+    because startup only checked that the variable was *set*.
+    """
+    monkeypatch.setenv("STUDY_PRODUCT", "products/nope")
+    monkeypatch.setenv("STUDY_DB", str(tmp_path / "x.db"))
+
+    from web import deps
+
+    with pytest.raises(deps.NoProductConfigured) as caught:
+        deps.preflight()
+    message = str(caught.value)
+    assert "working directory" in message
+    assert str(tmp_path.cwd()) in message or "products/nope" in message
+
+
+def test_a_missing_database_is_refused_rather_than_created(tmp_path, monkeypatch):
+    """The worse half of the same mistake.
+
+    `db.connect` creates the file, so a wrong `STUDY_DB` silently produced an
+    empty database -- a learner with no history, no items and no ratings, which
+    looks like a real profile until you notice nothing is in it. One was
+    created for real this way.
+    """
+    pack_dir = tmp_path / "pack"
+    (pack_dir / "taxonomy").mkdir(parents=True)
+    (pack_dir / "product.yaml").write_text(PRODUCT_YAML)
+    (pack_dir / "objective.yaml").write_text(OBJECTIVE_YAML)
+    (pack_dir / "taxonomy" / "tags.yaml").write_text(TAGS_YAML)
+
+    missing = tmp_path / "nowhere" / "study.db"
+    monkeypatch.setenv("STUDY_PRODUCT", str(pack_dir))
+    monkeypatch.setenv("STUDY_DB", str(missing))
+
+    from web import deps
+
+    with pytest.raises(deps.NoDatabase) as caught:
+        deps.preflight()
+    assert "study init" in str(caught.value)
+    assert not missing.exists(), "preflight must not create the database it rejects"
+
+
+def test_preflight_passes_on_a_real_setup(client, tmp_path, monkeypatch):
+    """And does not cry wolf: the fixture's own environment must satisfy it."""
+    from web import deps
+
+    deps.preflight()
