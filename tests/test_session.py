@@ -394,6 +394,85 @@ def test_a_live_drill_is_not_swept(drill_store_session):
     assert drill.submit_capture(served.token, good_capture()).token == served.token
 
 
+# ------------------------------------------------ recommend() vs start()
+
+
+def test_recommend_reserves_nothing(drill_store_session):
+    """The whole reason it is separate from `start()`.
+
+    A home page renders on every visit. If asking what to study also minted a
+    token and reserved an item, refreshing would churn item selection and fill
+    the store with drills nobody opened.
+    """
+    drill, store = drill_store_session
+    for _ in range(5):
+        assert isinstance(drill.recommend(), session.Recommendation)
+    assert len(store) == 0
+
+
+def test_recommend_and_start_agree_on_the_tag(drill):
+    choice = drill.recommend()
+    served = drill.start()
+    assert served.tag_slug == choice.tag_slug
+    assert served.target_band == choice.target_band
+
+
+def test_recommend_carries_the_three_multiplicands_separately(drill):
+    """Collapsing them to `priority` would hide which one is the blocker."""
+    choice = drill.recommend()
+    assert choice.priority == pytest.approx(
+        choice.gradient * choice.learnability * choice.availability
+    )
+
+
+def test_recommend_reports_starvation_for_a_tag_with_no_items(drill):
+    assert isinstance(drill.recommend(tag="no-such-tag"), session.Starved)
+
+
+SATISFIED_OBJECTIVE_YAML = """
+objective:
+  type: threshold
+  margin_policy: rating_deviation
+  margin_multiplier: 1.0
+  variables:
+    self_score:
+      kind: manual
+      default: 0
+  routes:
+    only:
+      - "self_score >= 5"
+"""
+
+
+def test_a_met_objective_recommends_nothing(tmp_path, conn, pack):
+    """DESIGN.md principle 9. This is the state the whole design turns on.
+
+    A tool that cannot say *stop studying* is an engagement product, so the
+    satisfied case is a distinct type -- a front end cannot render a start
+    button by forgetting to check a flag.
+    """
+    (tmp_path / "objective.yaml").write_text(SATISFIED_OBJECTIVE_YAML)
+    met = config.load_product(tmp_path)
+    db.upsert_product(conn, met, "digest")
+    db.set_manual_value(conn, "learner", met["product_id"], "self_score", 9.0)
+
+    drill = session.DrillSession(conn, met, "learner", store=session.DrillStore())
+    assert isinstance(drill.recommend(), session.Satisfied)
+    assert isinstance(drill.start(), session.Satisfied)
+
+
+def test_position_is_read_only(drill, conn):
+    """`study report` snapshots to objective_state; a page render must not.
+
+    Otherwise the position trajectory measures how often a tab was opened.
+    """
+    before = conn.execute("SELECT COUNT(*) FROM objective_state").fetchone()[0]
+    report = drill.position()
+    after = conn.execute("SELECT COUNT(*) FROM objective_state").fetchone()[0]
+    assert report.routes
+    assert after == before
+
+
 # ---------------------------------------------------- starvation and stop
 
 

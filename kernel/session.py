@@ -103,6 +103,28 @@ class Starved:
 
 
 @dataclass(frozen=True)
+class Recommendation:
+    """What to work on, and why -- with no item reserved yet.
+
+    The three multiplicands are carried separately rather than pre-summarised
+    because they fail differently and the difference is the whole diagnosis: a
+    low `gradient` means the objective does not care, low `learnability` means
+    it is the wrong difficulty, and low `availability` means the corpus cannot
+    serve it. Collapsing them to `priority` alone would hide which.
+    """
+
+    tag_slug: str
+    routed_from: str | None
+    priority: float
+    gradient: float
+    learnability: float
+    availability: float
+    predicted_p_correct: float
+    target_band: tuple[float, float]
+    reasons: list[str] = dataclasses_field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Served:
     """Everything the learner may see *before* answering.
 
@@ -262,8 +284,26 @@ class DrillSession:
 
     # -- phase 0 -----------------------------------------------------------
 
-    def start(self, tag: str | None = None) -> Served | Satisfied | Starved:
-        """Pick what to work on and serve it, key withheld."""
+    def position(self) -> objective_base.ObjectiveReport:
+        """Where the learner stands against the objective, per route.
+
+        Read-only and side-effect free -- unlike `study report`, this does not
+        snapshot to `objective_state`. A page that renders on every visit must
+        not write a position sample every time it is refreshed, or the
+        trajectory chart ends up measuring how often someone opened a tab.
+        """
+        state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
+        return objective_base.build(self.product["objective"]).report(state)
+
+    def recommend(self, tag: str | None = None) -> Recommendation | Satisfied | Starved:
+        """Decide what to work on, without reserving an item for it.
+
+        Split out of `start()` because a home page has to ask *what should I
+        study* without also answering *give me an item now* -- the second is a
+        commitment, and asking it on every page load would churn item
+        selection and mint tokens nobody uses. `start()` is this plus the
+        commitment.
+        """
         state = db.load_state(self.conn, self.learner, self.product["product_id"], self.product)
         objective = objective_base.build(self.product["objective"])
         if objective.satisfied(state):
@@ -284,6 +324,25 @@ class DrillSession:
             )
 
         alloc = ranked[0]
+        return Recommendation(
+            tag_slug=alloc.tag_slug,
+            routed_from=alloc.routed_from,
+            priority=alloc.priority,
+            gradient=alloc.gradient,
+            learnability=alloc.learnability,
+            availability=alloc.availability,
+            predicted_p_correct=alloc.predicted_p_correct,
+            target_band=alloc.target_band,
+            reasons=list(alloc.reasons),
+        )
+
+    def start(self, tag: str | None = None) -> Served | Satisfied | Starved:
+        """Pick what to work on and serve it, key withheld."""
+        choice = self.recommend(tag)
+        if not isinstance(choice, Recommendation):
+            return choice
+
+        alloc = choice
         lo, hi = alloc.target_band
         item = db.pick_item(self.conn, self.product["product_id"], alloc.tag_slug, lo, hi)
         if item is None:

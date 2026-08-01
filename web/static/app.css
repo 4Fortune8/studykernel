@@ -108,3 +108,34 @@ button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 /* Wide content scrolls in its own box; the page body never scrolls sideways. */
 main > table { display: block; overflow-x: auto; }
+
+/* ------------------------------------------------------------------ Now */
+
+/* The satisfied state. Nothing to click, by design -- WEB_UI.md §6. */
+.stop { padding: 3rem 0; text-align: center; }
+.stop h1 { font-size: 2.2rem; }
+.stop .note { display: inline-block; text-align: left; max-width: 32rem; }
+
+.do {
+  font-size: 1.05rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.routed { color: var(--muted); }
+
+td.why { color: var(--muted); font-size: 0.9rem; }
+tr.product th, tr.product td { border-top: 1px solid var(--fg); font-weight: 600; }
+
+/* Route probability drawn as a shape, not just a number -- a wide gap reads
+   faster than two decimals do. */
+td.meter { width: 40%; min-width: 6rem; }
+td.meter .fill {
+  display: block;
+  height: 0.55rem;
+  border-radius: 3px;
+  background: var(--accent);
+  min-width: 1px;
+}

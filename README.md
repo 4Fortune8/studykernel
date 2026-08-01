@@ -91,8 +91,13 @@ python3 -m pip install -e '.[web]' --no-build-isolation
 STUDY_PRODUCT=products/tsi-ready study-web        # http://127.0.0.1:8000
 ```
 
-Skeleton only so far — profile switcher and the app shell. The drill and
-report pages are WEB_UI.md phase 1.
+What works: the **Now** page — what to work on right now, why (gradient,
+learnability, availability, shown separately because they fail differently),
+and your position per route. It has three states, and the one that matters is
+*satisfied*: a full-page stop with the start control removed, not disabled.
+Plus profile switching. The drill and report pages are still WEB_UI.md
+phase 1, so `Now` currently hands you a `study drill --tag …` command rather
+than a button.
 
 `study-web` runs a single uvicorn worker and there is no flag to change that.
 In-progress drills live in an in-process dict, so a second worker would fail
@@ -137,9 +142,9 @@ reimplementing them. `cli.py` prompts and prints; it decides nothing.
 
 ## Status
 
-v0 scaffold. The loop runs end to end on ~8,200 imported items, 123 tests
-pass, the drill loop is extracted into `kernel/session.py`, and the web
-package exists as a shell with profile switching ([WEB_UI.md](WEB_UI.md)).
+v0 scaffold. The loop runs end to end on ~8,200 imported items, 129 tests
+pass, the drill loop lives in `kernel/session.py`, and the web UI has its
+`Now` page and profile switching ([WEB_UI.md](WEB_UI.md)).
 
 Current focus is math and ELAR multiple choice; the essay loop is deferred.
 What is not built: FSRS retention, learned-edge accrual, batch labeling and

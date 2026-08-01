@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from kernel import session
 from kernel.session import UnknownDrill
 from kernel.storage import db
 from web import deps
@@ -103,16 +104,36 @@ async def add_profile(
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
+    """`Now`. WEB_UI.md §5.1: one question, three states.
+
+    The satisfied state is a full-page stop with no way to start, per §6 --
+    removed, not disabled. A study tool that cannot say *stop* is an
+    engagement product, and this is the page where that gets decided.
+    """
     conn = deps.connect()
     try:
         learner = deps.active_learner(request.cookies, conn)
         if learner is None:
             return RedirectResponse("/profiles", status_code=303)
-        profile = db.get_profile(conn, learner)
+
+        product = deps.load_product()
+        drill = session.DrillSession(conn, product, learner)
+        choice = drill.recommend()
+
         return templates.TemplateResponse(
             request=request,
-            name="index.html",
-            context={"profile": profile, "product_dir": deps.product_dir()},
+            name="now.html",
+            context={
+                "profile": db.get_profile(conn, learner),
+                "learner": learner,
+                "product_dir": deps.product_dir(),
+                "choice": choice,
+                "satisfied": isinstance(choice, session.Satisfied),
+                "starved": isinstance(choice, session.Starved),
+                # Position is not shown on a satisfied page: the answer there
+                # is "stop", and a progress readout invites one more session.
+                "position": None if isinstance(choice, session.Satisfied) else drill.position(),
+            },
         )
     finally:
         conn.close()

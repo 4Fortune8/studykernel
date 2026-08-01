@@ -255,10 +255,48 @@ everything else was already keyed by `learner_id`, so no other schema changed.
 otherwise never reach an existing `study.db`. Verified on a copy of the real
 database: column added, 8,169 items and the attempt log untouched.
 
-Next: WEB_UI.md phase 1 — starting with `DrillSession.recommend()`, which
-`Now` needs and which does not exist. `start()` currently couples deciding
-what to study with reserving an item, so the home page cannot ask the first
-question without answering the second.
+### `recommend()` and the `Now` page
+
+`DrillSession.recommend()` exists and `start()` is built on it. The split is
+the point: a home page renders on every visit, and if asking *what should I
+study* also minted a token and reserved an item, refreshing would churn item
+selection and fill the store with drills nobody opened. `recommend()` returns
+`Recommendation | Satisfied | Starved` and reserves nothing; `start()` is that
+plus the commitment.
+
+`Recommendation` carries gradient, learnability and availability separately
+rather than pre-multiplied, because they fail differently and the difference
+*is* the diagnosis: low gradient means the objective does not care, low
+learnability means wrong difficulty, low availability means the corpus cannot
+serve it. `Now` shows all three under "Why this".
+
+`DrillSession.position()` returns the `ObjectiveReport` and — unlike
+`study report` — does **not** snapshot to `objective_state`. A page that
+renders on every visit must not write a position sample each time, or the
+trajectory chart in phase 4 ends up measuring how often a tab was opened.
+There is a test for that.
+
+All three states of `Now` were driven over HTTP, not just unit-tested:
+
+| State | Verified |
+|---|---|
+| servable | recommendation, the three multiplicands, expected hit rate, position |
+| satisfied | full-page stop; **zero** start controls and **no** position readout |
+| starved | corpus-problem message pointing at the acquisition backlog |
+
+The satisfied page deliberately omits the position table. The answer there is
+*stop*, and a progress readout underneath it is an invitation to one more
+session — §6's whole point.
+
+**The start control is currently the terminal command** — `Now` prints
+`study drill --tag <slug>` rather than a button, because the browser drill
+flow does not exist yet. That is honest and useful today: the page decides
+what to study, the terminal does it. It becomes a real button in §5.2.
+
+Next: the drill flow (WEB_UI.md §5.2), which is the last thing standing
+between this and not needing the terminal. Then bundled KaTeX, which is the
+reason the UI exists at all — ~3,000 LaTeX-dense items are unreadable as
+source.
 
 ### Priority (2026-08-01)
 

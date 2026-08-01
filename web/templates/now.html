@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Now &middot; studykernel{% endblock %}
+
+{% block content %}
+
+{% if satisfied %}
+  {# WEB_UI.md §6: a full-page stop. No start control, no position readout,
+     nothing below this to scroll to. Removed, not disabled. #}
+  <section class="stop">
+    <h1>Stop studying.</h1>
+    <p>{{ choice.message }}</p>
+    <p class="note">
+      Every route is met with margin. There is nothing here that would raise
+      your probability of passing, so the honest recommendation is to do
+      something else. Come back if the objective changes.
+    </p>
+  </section>
+
+{% elif starved %}
+  <h1>Nothing to serve</h1>
+  <p>{{ choice.reason }}</p>
+  <p class="note">
+    This is a corpus problem, not a you problem: the objective wants work you
+    have no items for. <code>study report</code> prints the acquisition
+    backlog, ordered by the objective — acquire down it, then stop.
+  </p>
+
+{% else %}
+  <h1>{{ choice.tag_slug }}</h1>
+  {% if choice.routed_from %}
+    <p class="routed">
+      Routed here from <code>{{ choice.routed_from }}</code> — that tag sits
+      below the prerequisite floor, so this is what unblocks it.
+    </p>
+  {% endif %}
+
+  <p class="do">
+    <code>study drill --tag {{ choice.tag_slug }}</code>
+  </p>
+  <p class="note">
+    The drill loop still runs in the terminal. The browser version is the next
+    thing to be built (WEB_UI.md §5.2); until then this page decides what to
+    work on and the terminal does it.
+  </p>
+
+  <h2>Why this</h2>
+  <table>
+    <tbody>
+      <tr>
+        <th>Gradient</th>
+        <td class="num">{{ "%.6f"|format(choice.gradient) }}</td>
+        <td class="why">how much the objective moves per unit of progress here</td>
+      </tr>
+      <tr>
+        <th>Learnability</th>
+        <td class="num">{{ "%.2f"|format(choice.learnability) }}</td>
+        <td class="why">whether it is the right difficulty to be teachable now</td>
+      </tr>
+      <tr>
+        <th>Availability</th>
+        <td class="num">{{ "%.2f"|format(choice.availability) }}</td>
+        <td class="why">whether the corpus can actually serve it</td>
+      </tr>
+      <tr class="product">
+        <th>Priority</th>
+        <td class="num">{{ "%.4f"|format(choice.priority) }}</td>
+        <td class="why">the three multiplied</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    Expect to get about
+    <strong>{{ "%.0f"|format(choice.predicted_p_correct * 100) }}%</strong>
+    right at this difficulty (item ratings
+    {{ "%.0f"|format(choice.target_band[0]) }}–{{ "%.0f"|format(choice.target_band[1]) }}).
+    That is deliberate: too easy proves nothing and too hard teaches nothing.
+  </p>
+
+  {% for reason in choice.reasons %}
+    <p class="note">{{ reason }}</p>
+  {% endfor %}
+{% endif %}
+
+{% if position %}
+  <h2>Position</h2>
+  <p>{{ position.headline }}</p>
+  <table>
+    <thead>
+      <tr><th>Route</th><th class="num">P(success)</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for route in position.routes %}
+      <tr>
+        <td><code>{{ route.expression }}</code></td>
+        <td class="num">{{ "%.1f"|format(route.p_success * 100) }}%</td>
+        <td class="meter">
+          <span class="fill" style="width: {{ (route.p_success * 100)|round(1) }}%"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% for note in position.notes %}
+    <p class="note">{{ note }}</p>
+  {% endfor %}
+  <p class="note">
+    Routes are separate requirements: every one of them has to hold, so the
+    lowest is the one that decides. P(pass) is ordinal until the scale mapping
+    is anchored against official sample items — good for ranking what to
+    study, not for deciding you are ready.
+  </p>
+{% endif %}
+
+{% endblock %}

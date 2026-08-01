@@ -313,8 +313,9 @@ HANDOFF.md §6.
 
 **Phase 1 — parity plus the reason to exist.**
 - [x] Extract `kernel/session.py`; all 76 existing tests pass unchanged
-- [ ] FastAPI skeleton, `deps.py`, bundled KaTeX
-- [ ] `Now` page with all three states, satisfied state included from day one
+- [x] FastAPI skeleton, `deps.py` — bundled KaTeX still outstanding
+- [x] `Now` page with all three states, satisfied state included from day one
+- [x] Profile switching (not in the original plan; see HANDOFF.md)
 - [ ] Drill flow, three phases, with the §4.1 key-absence test in the suite
 - [ ] Observed `min_hint_level` (§4.2)
 - [ ] Exchange panel with inline validation
