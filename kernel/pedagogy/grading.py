@@ -152,7 +152,7 @@ NUMERIC = "numeric"
 _NUM = r"[+\-]?[\d,]*\.?\d+"
 _TEX_FRAC = rf"\\[dt]?frac\s*\{{\s*{_NUM}\s*\}}\s*\{{\s*{_NUM}\s*\}}"
 NUMERIC_INPUT_PATTERN = (
-    rf"\s*\$?\s*[+\-]?\s*(?:{_TEX_FRAC}|{_NUM}(?:\s*/\s*{_NUM})?)\s*\\?%?\.?\s*"
+    rf"\s*\$?\s*(?:[+\-](?!\s*[+\-])\s*)?(?:{_TEX_FRAC}|{_NUM}(?:\s*/\s*{_NUM})?)\s*\\?%?\.?\s*"
 )
 
 
