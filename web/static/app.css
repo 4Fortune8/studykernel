@@ -426,3 +426,27 @@ span.right { color: var(--accent); }
   padding-left: 0.9rem;
   font-size: 0.85rem;
 }
+
+/* The relay in flight (DESIGN.md §16 v2). The pulse is the only thing on the
+   page telling the learner a request is out; without it a three-second wait
+   after the gate reads as a panel that failed to render. */
+.relaying { margin: 0.4rem 0 1rem; }
+.relaying .note {
+  border-left: 2px solid var(--accent);
+  animation: relay-pulse 1.4s ease-in-out infinite;
+}
+@keyframes relay-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .relaying .note { animation: none; }
+}
+
+/* Collapsed, never removed. The clipboard is the protocol and the relay is a
+   shortcut over it, so the paste box stays reachable in one click rather than
+   appearing only once something has already gone wrong. */
+.paste-fallback { margin-top: 1.2rem; }
+.paste-fallback > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.paste-fallback[open] > summary { margin-bottom: 0.6rem; }

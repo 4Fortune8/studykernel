@@ -54,7 +54,15 @@ LATE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("attempts", "stuck", "INTEGER NOT NULL DEFAULT 0"),
     ("diagnoses", "divergence", "TEXT"),
     ("diagnoses", "explanation", "TEXT"),
+    # Null on every row written before the relay existed, which is correct:
+    # those all came back through the clipboard, but the log should say it did
+    # not know rather than assert something nobody recorded.
+    ("exchanges", "responder", "TEXT"),
 )
+
+# The default `responder`. A reply carried back by hand is the original path
+# and stays the unmarked case; the relay is what has to name itself.
+RESPONDER_PASTE = "paste"
 
 
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
@@ -811,7 +819,7 @@ def waive_exchange(conn: sqlite3.Connection, attempt_id: int, waived: bool = Tru
 def load_briefing(conn: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
     """The stored briefing, so a skipped exchange can be picked up later."""
     return conn.execute(
-        """SELECT briefing, prompt_version, payload_json
+        """SELECT briefing, prompt_version, payload_json, responder
              FROM exchanges WHERE attempt_id = ?""",
         (attempt_id,),
     ).fetchone()

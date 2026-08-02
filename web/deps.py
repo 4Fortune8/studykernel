@@ -14,10 +14,21 @@ from pathlib import Path
 from typing import Any
 
 from kernel import config
+from kernel.exchange import relay
 from kernel.storage import db
 
 PROFILE_COOKIE = "studykernel_profile"
 SUBJECT_COOKIE = "studykernel_subject"
+
+
+def relay_ready() -> bool:
+    """Whether the tutoring exchange can be sent without the clipboard.
+
+    Read per call rather than captured at import, so a key added to `.env` and
+    a restart is the whole setup step, and so a test can turn the relay on and
+    off with `monkeypatch.setenv` instead of reloading the module.
+    """
+    return relay.configured()
 
 
 class NoProductConfigured(RuntimeError):

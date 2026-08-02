@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from kernel import config, session
 from kernel.exchange import record as record_mod
+from kernel.exchange import relay
 from kernel.pedagogy import capture as capture_mod
 from kernel.pedagogy import grading
 from kernel.session import UnknownDrill
@@ -54,6 +55,11 @@ templates.env.globals["numeric_answer_pattern"] = grading.NUMERIC_INPUT_PATTERN
 # reason: it is product configuration that turns the *field* on or off, but
 # the methods themselves are the same list for every item that asks.
 templates.env.globals["verification_methods"] = capture_mod.VERIFICATION_METHODS
+# Whether the exchange can be sent without a clipboard. A *callable* global, so
+# every render asks rather than trusting a value captured at import -- the
+# answer is an environment variable and the page that offers the button has to
+# agree with the route that would serve it.
+templates.env.globals["relay_ready"] = deps.relay_ready
 
 
 @asynccontextmanager
@@ -451,6 +457,54 @@ async def drill_record(request: Request, token: str, pasted: str = Form("")) -> 
         conn.close()
 
 
+@app.post("/drill/{token}/tutor", response_class=HTMLResponse)
+async def drill_tutor(request: Request, token: str) -> HTMLResponse:
+    """Send the briefing and record the reply, with no clipboard in the middle.
+
+    Returns the *same* partial the paste box returns, success or failure, which
+    is what keeps this an ergonomic change rather than a second protocol: a
+    relay error renders the error and the paste form under it, so the fallback
+    is not a thing to go and find, it is already on the page.
+    """
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        briefing = drill.briefing(token)
+        # A send takes seconds, and this fires itself on load. A refresh while
+        # one is in flight would otherwise post a second request whose only
+        # possible outcome is "already has a diagnosis recorded" -- an error
+        # message, with a paste box under it, for a drill that just succeeded.
+        recorded = drill.view(token).diagnosis
+        if recorded is not None:
+            return templates.TemplateResponse(
+                request=request,
+                name="drill/_exchange_result.html",
+                context={"diagnosis": recorded, "token": token, "briefing": briefing},
+            )
+        try:
+            diagnosis = drill.tutor(token)
+        except (relay.RelayError, record_mod.RecordError) as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="drill/_exchange_result.html",
+                context={"error": str(exc), "token": token, "briefing": briefing,
+                         "record_url": f"/drill/{token}/record",
+                         # A failed send must not offer to send again on load,
+                         # or a bad key becomes an infinite loop against a rate
+                         # limiter. The retry is a button the learner presses.
+                         "relay_failed": True},
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="drill/_exchange_result.html",
+            context={"diagnosis": diagnosis, "token": token, "briefing": briefing},
+        )
+    finally:
+        conn.close()
+
+
 @app.post("/drill/{token}/waive")
 async def drill_waive(request: Request, token: str) -> RedirectResponse:
     """"I don't need tutoring on this one." DESIGN.md §10.
@@ -572,6 +626,37 @@ async def history_record(
         conn.close()
 
 
+@app.post("/history/{attempt_id}/tutor", response_class=HTMLResponse)
+async def history_tutor(request: Request, attempt_id: int) -> HTMLResponse:
+    """`/drill/{token}/tutor` for an exchange picked back up later.
+
+    Never fired on load, unlike the drill panel: an open exchange in history is
+    one the learner already decided not to run, so re-deciding it is a click.
+    """
+    conn = deps.connect()
+    try:
+        learner = deps.active_learner(request.cookies, conn)
+        if learner is None:
+            return RedirectResponse("/profiles", status_code=303)
+        drill = session.DrillSession(conn, deps.load_product(), learner)
+        record_url = f"/history/{attempt_id}/record"
+        try:
+            diagnosis = drill.tutor_attempt(attempt_id)
+        except (relay.RelayError, record_mod.RecordError) as exc:
+            return templates.TemplateResponse(
+                request=request, name="drill/_exchange_result.html",
+                context={"error": str(exc), "attempt_id": attempt_id,
+                         "record_url": record_url, "relay_failed": True},
+            )
+        db.waive_exchange(conn, attempt_id, waived=False)
+        return templates.TemplateResponse(
+            request=request, name="drill/_exchange_result.html",
+            context={"diagnosis": diagnosis, "attempt_id": attempt_id},
+        )
+    finally:
+        conn.close()
+
+
 def run() -> None:
     """Entry point for the `study-web` console script.
 
@@ -580,5 +665,10 @@ def run() -> None:
     """
     import uvicorn
 
+    # Here and not in `preflight()`: reading a secrets file is a property of
+    # starting this program, not of building the app object. A test client
+    # constructs the app without ever going through here, so a suite run from
+    # the repository root does not quietly acquire the developer's API key.
+    config.load_env_file()
     deps.product_dir()  # fail loudly at startup, not on the first request
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

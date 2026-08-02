@@ -11,6 +11,7 @@ learner cannot tell, because they will not remember whether they peeked.
 
 from __future__ import annotations
 
+import json
 import re
 from markupsafe import escape  # what Jinja autoescaping actually emits
 
@@ -21,6 +22,7 @@ pytest.importorskip("fastapi", reason="web extra not installed")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from kernel import config  # noqa: E402
+from kernel.exchange import relay  # noqa: E402
 from kernel.pedagogy import capture as capture_mod  # noqa: E402
 from kernel.pedagogy import explain_back  # noqa: E402
 from kernel.storage import db  # noqa: E402
@@ -263,7 +265,7 @@ def test_a_multiple_choice_item_is_answered_by_selection(client):
 
 
 def test_the_options_come_back_marked_in_the_answer_swap(client):
-    "\"Key: C -- you answered B\" is two bare letters without the options.
+    """"Key: C -- you answered B" is two bare letters without the options.
 
     They live above `#panel` and every answer posts with `hx-target="#panel"`,
     so the swap has to carry them out of band or they stay gone until a manual
@@ -866,3 +868,178 @@ def test_preflight_passes_on_a_real_setup(client, tmp_path, monkeypatch):
     from web import deps
 
     deps.preflight()
+
+
+# ------------------------------------------------- the optional relay, in the UI
+#
+# DESIGN.md §16 v2. The relay removes the clipboard, and the property that
+# matters at this layer is that removing it did not remove the clipboard: every
+# assertion below is either "the fallback is still on the page" or "the page
+# does not send something the learner did not ask for".
+
+
+@pytest.fixture
+def relayed(monkeypatch):
+    """Turn the relay on and hand back a recorder for what it was sent."""
+    for name in relay.KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("STUDY_RELAY_KEY", "test-key")
+
+    sent: list[tuple] = []
+
+    def fake_send(body, system=None, schema=None, config=None):
+        sent.append((body, system, schema))
+        item_id = re.search(r"--- ITEM (\S+) ---", body).group(1)
+        return relay.RelayReply(
+            text=json.dumps(
+                {
+                    "item_id": item_id,
+                    "divergence": "You matched on a repeated word.",
+                    "error_code": "execution_error",
+                    "prerequisite_gaps": [],
+                    "one_fix": "check the carry",
+                    "explanation": "The stem asks for the difference, not the sum.",
+                    "trigger_miss": False,
+                    "explain_back_ok": True,
+                    "explain_back_feedback": "",
+                    "disputed_key": False,
+                }
+            ),
+            model="test-model",
+            responder="api:test-model",
+        )
+
+    monkeypatch.setattr(relay, "send", fake_send)
+    fake_send.sent = sent  # type: ignore[attr-defined]
+    return fake_send
+
+
+@pytest.fixture
+def relay_off(monkeypatch):
+    for name in relay.KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_with_no_key_the_panel_is_the_paste_box_it_has_always_been(client, relay_off):
+    """The unconfigured state is the supported one, not a degraded one."""
+    token = finish_a_drill(client, answer="not-it")
+    panel = client.get(f"/drill/{token}").text
+    assert "There is no API and does" in panel
+    assert 'name="pasted"' in panel
+    assert f"/drill/{token}/tutor" not in panel
+
+
+def test_a_missed_item_sends_itself_and_shows_the_diagnosis(client, relayed):
+    """The whole point of the integration: on the item where the exchange earns
+    its keep, the learner does not carry anything anywhere."""
+    token = finish_a_drill(client, answer="not-it")
+    panel = client.get(f"/drill/{token}").text
+    assert f'hx-post="/drill/{token}/tutor"' in panel
+    assert 'hx-trigger="load"' in panel
+
+    result = client.post(f"/drill/{token}/tutor").text
+    assert "execution_error" in result
+    assert "check the carry" in result
+    assert "You matched on a repeated word." in result
+
+
+def test_a_clean_solve_is_asked_before_it_is_sent(client, relayed):
+    """A correct answer at L0 is the case the waive button exists for. Firing a
+    request at it anyway spends quota on the items the learner was about to
+    skip, and quietly turns "skip the tutoring" into "skip reading it"."""
+    token = finish_a_drill(client)  # correct, unaided
+    panel = client.get(f"/drill/{token}").text
+    assert f'hx-post="/drill/{token}/tutor"' in panel
+    assert 'hx-trigger="click"' in panel
+    assert 'hx-trigger="load"' not in panel
+    assert f"/drill/{token}/waive" in panel, "and skipping is still offered"
+
+
+def test_the_paste_box_survives_the_relay(client, relayed):
+    """DESIGN.md §10 is the protocol; the relay is a shortcut over it. The box
+    that path needs stays on the page rather than appearing once something
+    breaks."""
+    token = finish_a_drill(client, answer="not-it")
+    panel = client.get(f"/drill/{token}").text
+    assert 'name="pasted"' in panel
+    assert "Paste a reply instead" in panel
+
+
+def test_a_relay_failure_falls_back_instead_of_losing_the_drill(client, monkeypatch):
+    """The attempt is durable and the briefing is stored well before this runs,
+    so a dead API is an inconvenience, not a lost item."""
+    monkeypatch.setenv("STUDY_RELAY_KEY", "test-key")
+
+    def explode(*_args, **_kwargs):
+        raise relay.RelayError("the tutoring API is rate limiting or out of quota")
+
+    monkeypatch.setattr(relay, "send", explode)
+
+    token = finish_a_drill(client, answer="not-it")
+    result = client.post(f"/drill/{token}/tutor").text
+    assert "rate limiting" in result
+    assert 'name="pasted"' in result, "the fallback is on the page, not behind a link"
+    assert "Try sending again" in result
+    # And a retry is a click, never a reload -- a page that re-sends itself
+    # against a rate limiter makes the problem worse while looking helpful.
+    assert 'hx-trigger="load"' not in result
+
+
+def test_a_relayed_diagnosis_is_recorded_as_the_models(client, tmp_path, relayed):
+    token = finish_a_drill(client, answer="not-it")
+    client.post(f"/drill/{token}/tutor")
+
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute("SELECT attempt_id, responder FROM exchanges").fetchone()
+    assert row["responder"] == "api:test-model"
+    diagnosis = conn.execute(
+        "SELECT error_code FROM diagnoses WHERE attempt_id = ?", (row["attempt_id"],)
+    ).fetchone()
+    assert diagnosis["error_code"] == "execution_error"
+    conn.close()
+
+
+def test_an_open_exchange_in_history_waits_to_be_asked(client, tmp_path, relayed):
+    """It is open because the learner walked away from it. Opening the page
+    again is not them asking for it."""
+    finish_a_drill(client, answer="not-it")
+    conn = db.connect(tmp_path / "web.db")
+    attempt_id = conn.execute("SELECT attempt_id FROM attempts").fetchone()["attempt_id"]
+    conn.close()
+
+    page = client.get(f"/history/{attempt_id}").text
+    assert f'hx-post="/history/{attempt_id}/tutor"' in page
+    assert 'hx-trigger="load"' not in page
+
+    result = client.post(f"/history/{attempt_id}/tutor").text
+    assert "execution_error" in result
+
+
+def test_sending_from_history_clears_the_waiver(client, tmp_path, relayed):
+    token = finish_a_drill(client, answer="not-it")
+    client.post(f"/drill/{token}/waive", follow_redirects=False)
+
+    conn = db.connect(tmp_path / "web.db")
+    attempt_id = conn.execute("SELECT attempt_id FROM attempts").fetchone()["attempt_id"]
+    client.post(f"/history/{attempt_id}/tutor")
+
+    after = conn.execute(
+        "SELECT exchange_waived_at FROM attempts WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()
+    assert after["exchange_waived_at"] is None, "a diagnosis supersedes a skip"
+    conn.close()
+
+
+def test_sending_twice_shows_the_diagnosis_rather_than_an_error(client, relayed):
+    """A send takes seconds and this panel fires itself on load, so a refresh
+    mid-flight posts a second request. Its only possible outcome would be
+    "already has a diagnosis recorded" -- an error, with a paste box under it,
+    for a drill that just succeeded."""
+    token = finish_a_drill(client, answer="not-it")
+    first = client.post(f"/drill/{token}/tutor").text
+    second = client.post(f"/drill/{token}/tutor").text
+
+    assert "execution_error" in first
+    assert "execution_error" in second
+    assert "already has a diagnosis" not in second
+    assert len(relayed.sent) == 1, "and the second one costs nothing"

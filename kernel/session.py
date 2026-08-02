@@ -6,8 +6,16 @@ second front end needs the identical sequence, and a copy of it would drift
 silently, because both copies would keep looking like they work.
 
 So the sequence lives here and both front ends are adapters over it. This
-module does no I/O beyond the database: it never reads stdin, never prints,
-never writes a file. A caller that needs the briefing on disk writes it.
+module does no *front end* I/O: it never reads stdin, never prints, never
+writes a file. A caller that needs the briefing on disk writes it.
+
+The one outbound call it does make is `tutor()`, which sends a briefing to the
+optional relay and records what comes back (DESIGN.md §16 v2). It lives here
+for the same reason the rest does: brief, send, parse, reject on `item_id`
+mismatch, persist is a five-step sequence with a validation step in the middle,
+and two front ends holding their own copy of it is exactly the drift this
+module exists to prevent. The sender is injectable, so nothing here needs a
+socket to be tested.
 
 **The pedagogy invariants are enforced here, not by caller control flow**,
 which is the whole point of the extraction (WEB_UI.md §8 risk 2):
@@ -55,6 +63,7 @@ from typing import Any
 from kernel import allocator
 from kernel.exchange import briefing as briefing_mod
 from kernel.exchange import record as record_mod
+from kernel.exchange import relay
 from kernel.objectives import base as objective_base
 from kernel.pedagogy import capture as capture_mod
 from kernel.pedagogy import explain_back, grading, hints
@@ -235,6 +244,14 @@ class Briefing:
     attempt_id: int
     prompt_version: str
     item_id: str
+    # The same briefing as the two halves it is built from: the stable
+    # instructions, and the item data. `text` is their concatenation and stays
+    # the canonical form -- it is what is stored, copied and displayed. These
+    # exist because a relay call wants the halves in separate turns, and
+    # re-splitting a rendered string to get them back would be a parser for a
+    # format this module already had structured.
+    system: str = ""
+    body: str = ""
 
 
 # ------------------------------------------------------- in-progress state
@@ -271,6 +288,10 @@ class _Drill:
     stuck: bool = False
     attempt_id: int | None = None
     briefing_text: str | None = None
+    # The halves `briefing_text` was built from. Kept rather than re-derived so
+    # a relay call after a page refresh sends byte-for-byte what was stored.
+    briefing_system: str | None = None
+    briefing_body: str | None = None
     diagnosis: record_mod.Diagnosis | None = None
     # Monotonic, not wall clock: expiry must not move when the system clock
     # does. `started_at` stays wall clock because it is written to the log.
@@ -674,6 +695,8 @@ class DrillSession:
                 attempt_id=int(drill.attempt_id),  # type: ignore[arg-type]
                 prompt_version=briefing_mod.PROMPT_VERSION,
                 item_id=drill.item["item_id"],
+                system=drill.briefing_system or "",
+                body=drill.briefing_body or "",
             )
 
         item = drill.item
@@ -698,13 +721,24 @@ class DrillSession:
             min_hint_level=drill.min_hint_level,
             stuck=drill.stuck,
         )
-        text = briefing_mod.render(b_item, b_cap)
-        text += f"\n\n--- LEARNER'S EXPLAIN-BACK ---\n{drill.explanation}\n"
+        # The relay sends these as two turns and the clipboard gets them joined.
+        # Rendered once, here, so the two paths cannot brief a reader differently.
+        # `tutor()` re-renders the instruction half with `schema_enforced=True`;
+        # that swaps the trailing "return a fenced block" contract for an id-echo
+        # rule and changes nothing else, because under a response schema the
+        # format instruction is describing something the decoder already imposes.
+        system = briefing_mod.instructions(
+            b_item.explanation_policy, schema_enforced=False
+        )
+        body = briefing_mod.item_block(b_item, b_cap, explain_back=drill.explanation)
+        text = system + "\n\n" + body
 
         db.record_exchange(
             self.conn, int(drill.attempt_id), briefing_mod.PROMPT_VERSION, text, None  # type: ignore[arg-type]
         )
         drill.briefing_text = text
+        drill.briefing_system = system
+        drill.briefing_body = body
         drill.phase = Phase.BRIEFED
 
         return Briefing(
@@ -712,9 +746,13 @@ class DrillSession:
             attempt_id=int(drill.attempt_id),  # type: ignore[arg-type]
             prompt_version=briefing_mod.PROMPT_VERSION,
             item_id=item["item_id"],
+            system=system,
+            body=body,
         )
 
-    def record_for(self, token: str, pasted_text: str) -> record_mod.Diagnosis:
+    def record_for(
+        self, token: str, pasted_text: str, responder: str | None = None
+    ) -> record_mod.Diagnosis:
         """`record()` for a drill still in hand, keyed by token.
 
         The token-holding caller should use this rather than `record()`: the
@@ -728,9 +766,63 @@ class DrillSession:
             raise record_mod.RecordError(
                 f"attempt {drill.attempt_id} already has a diagnosis recorded"
             )
-        diagnosis = self.record(int(drill.attempt_id), pasted_text)  # type: ignore[arg-type]
+        diagnosis = self.record(int(drill.attempt_id), pasted_text, responder)  # type: ignore[arg-type]
         drill.diagnosis = diagnosis
         return diagnosis
+
+    # -- the optional relay: the same exchange, without the clipboard --------
+
+    def product_error_codes(self) -> frozenset[str]:
+        return frozenset(self.product.get("error_code_weights", {}) or {})
+
+    def tutor(self, token: str, send: Any = None) -> record_mod.Diagnosis:
+        """Send the briefing, record the reply. DESIGN.md §16 v2.
+
+        Every safety property of the copy/paste path is unchanged, because this
+        does not replace any of it: the reply goes through `record_for`, which
+        goes through `record`, which rejects on `item_id` mismatch. What the
+        relay removes is two clipboard operations and a tab switch, and what it
+        adds is a response schema, which makes the failures the paste path
+        actually suffers -- prose around the block, a missing `one_fix`, an
+        invented error code -- unrepresentable rather than merely rejected.
+
+        `send` is injected for tests; it defaults to the real transport. Raising
+        `relay.RelayError` is a normal outcome and the caller is expected to
+        fall back to the paste box, not to treat the drill as broken: the
+        attempt is durable and the briefing is stored well before this runs.
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.EXPLAINED, Phase.BRIEFED)
+        brief = self.briefing(token)
+        sender = send or relay.send
+        reply = sender(
+            brief.body,
+            briefing_mod.instructions(
+                drill.section.get("explanation_policy", "withheld"),
+                schema_enforced=True,
+            ),
+            briefing_mod.response_schema(self.product_error_codes()),
+        )
+        return self.record_for(token, reply.text, responder=reply.responder)
+
+    def tutor_attempt(self, attempt_id: int, send: Any = None) -> record_mod.Diagnosis:
+        """`tutor()` for an exchange picked back up later, keyed by attempt.
+
+        There is no drill in hand here and no halves to send as two turns --
+        only the briefing as it was stored. It goes as one turn, which is what
+        the clipboard path does too, so this is the *same* request the learner
+        would otherwise have made by hand.
+        """
+        row = db.load_briefing(self.conn, attempt_id)
+        if row is None:
+            raise record_mod.RecordError(
+                f"no briefing stored for attempt {attempt_id} -- nothing to send"
+            )
+        sender = send or relay.send
+        reply = sender(
+            row["briefing"], None, briefing_mod.response_schema(self.product_error_codes())
+        )
+        return self.record(attempt_id, reply.text, responder=reply.responder)
 
     def finish(self, token: str) -> None:
         """Release in-flight state. The attempt is already durable.
@@ -743,13 +835,21 @@ class DrillSession:
 
     # -- the inbound half, later and possibly in another process ----------
 
-    def record(self, attempt_id: int, pasted_text: str) -> record_mod.Diagnosis:
+    def record(
+        self, attempt_id: int, pasted_text: str, responder: str | None = None
+    ) -> record_mod.Diagnosis:
         """Parse a returned payload and log it against `attempt_id`.
 
         Rejects on `item_id` mismatch inside `exchange/record` -- the check
         that makes the copy-paste protocol safe without an API. The item id
         comes from the attempt row, never from the caller, so a stale tab
         cannot land a diagnosis on the wrong item by supplying both halves.
+
+        `responder` names what produced the reply. It defaults to the paste
+        path, which is what an omitted argument has always meant, and the relay
+        supplies a model id. Worth storing because the two are not
+        interchangeable evidence: a run of diagnoses is only comparable across
+        time if you can tell which of them a model wrote.
         """
         row = self.conn.execute(
             "SELECT item_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
@@ -757,13 +857,12 @@ class DrillSession:
         if row is None:
             raise record_mod.RecordError(f"no attempt {attempt_id}")
 
-        product_codes = frozenset(self.product.get("error_code_weights", {}) or {})
-        diagnosis = record_mod.parse(pasted_text, row["item_id"], product_codes)
+        diagnosis = record_mod.parse(pasted_text, row["item_id"], self.product_error_codes())
 
         db.record_diagnosis(self.conn, attempt_id, diagnosis)
         self.conn.execute(
-            "UPDATE exchanges SET payload_json = ? WHERE attempt_id = ?",
-            (json.dumps(diagnosis.raw), attempt_id),
+            "UPDATE exchanges SET payload_json = ?, responder = ? WHERE attempt_id = ?",
+            (json.dumps(diagnosis.raw), responder or db.RESPONDER_PASTE, attempt_id),
         )
         self.conn.commit()
         return diagnosis

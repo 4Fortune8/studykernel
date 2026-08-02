@@ -10,6 +10,7 @@ allocator silently ranks everything at zero.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,49 @@ from kernel.objectives import routes as routes_mod
 
 class PackError(ValueError):
     """Raised for a malformed or internally inconsistent product pack."""
+
+
+# ------------------------------------------------------------------ secrets
+
+DEFAULT_ENV_FILE = ".env"
+
+
+def load_env_file(path: Path | str | None = None, *, override: bool = False) -> dict[str, str]:
+    """Read `KEY=value` lines into the environment. Returns what it set.
+
+    Both front ends already take their configuration from environment variables
+    (`STUDY_DB`, `STUDY_PRODUCT`, `STUDY_LEARNER`), and the optional tutoring
+    relay needs one more that must not be typed into a shell history or a
+    launcher: an API key. A file is the right place for it and `.env` is the
+    name everyone already reaches for.
+
+    Deliberately not a dotenv library. Three lines of parsing against a new
+    runtime dependency is not a trade worth making, and the file this reads is
+    written by hand and read by one process.
+
+    Real environment wins by default: a key exported for one session should not
+    be silently overridden by a stale file, and `override=True` is there for the
+    caller that means the opposite.
+    """
+    env_path = Path(path) if path is not None else Path(os.environ.get("STUDY_ENV", DEFAULT_ENV_FILE))
+    if not env_path.is_file():
+        return {}
+
+    loaded: dict[str, str] = {}
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if not key or (key in os.environ and not override):
+            continue
+        os.environ[key] = value
+        loaded[key] = value
+    return loaded
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

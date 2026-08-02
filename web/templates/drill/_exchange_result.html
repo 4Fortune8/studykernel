@@ -2,6 +2,21 @@
   {# Inline and immediate -- the mismatch message names both ids, so a stale
      tab reads as the cause rather than a mystery. WEB_UI.md §4.5. #}
   <p class="error">{{ error }}</p>
+  {% if relay_failed and token %}
+    {# A button, never `hx-trigger="load"`. Whatever just failed will fail the
+       same way on a retry the learner did not ask for, and a page that retries
+       itself against a rate limiter makes the quota problem worse while
+       looking like it is helping. #}
+    <div hx-post="/drill/{{ token }}/tutor" hx-trigger="click"
+         hx-target="#exchange-result" hx-swap="innerHTML">
+      <button type="button" class="ghost">Try sending again</button>
+    </div>
+  {% elif relay_failed and attempt_id %}
+    <div hx-post="/history/{{ attempt_id }}/tutor" hx-trigger="click"
+         hx-target="#exchange-result" hx-swap="innerHTML">
+      <button type="button" class="ghost">Try sending again</button>
+    </div>
+  {% endif %}
   {% include "drill/_exchange_form.html" %}
 {% else %}
   <div class="diagnosis">

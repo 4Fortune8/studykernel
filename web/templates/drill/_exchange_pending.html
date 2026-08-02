@@ -1,0 +1,29 @@
+{# The relay in flight. Fires itself on load when the item earned the exchange,
+   and waits for a click when it did not -- see `_exchange.html` for which.
+
+   `hx-trigger="load"` only ever appears on a fresh panel. A relay that failed
+   comes back through `_exchange_result.html` with a retry button instead, so a
+   rejected key cannot turn into a request loop against a rate limiter. #}
+<div class="relaying"
+     hx-post="{{ tutor_url }}"
+     hx-trigger="{{ 'load' if auto_send else 'click' }}"
+     hx-target="#exchange-result"
+     hx-swap="innerHTML"
+     hx-disabled-elt="find button">
+  {% if auto_send %}
+    <p class="note" aria-live="polite">Sending the briefing for tutoring…</p>
+  {% else %}
+    <button type="button">Get the tutoring on this one</button>
+    <span class="note inline">
+      sends the briefing above and records the reply
+    </span>
+  {% endif %}
+</div>
+
+{# Always reachable, never in the way. The clipboard path is the protocol
+   (DESIGN.md §10) and the relay is a shortcut over it, so the box that path
+   needs stays on the page rather than appearing only once something breaks. #}
+<details class="paste-fallback">
+  <summary>Paste a reply instead</summary>
+  {% include "drill/_exchange_form.html" %}
+</details>

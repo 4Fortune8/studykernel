@@ -18,7 +18,8 @@ kernel/          installable package; contains no exam names (CI-enforced)
   objectives/    threshold, maximize, mastery, deadline + route expressions
   allocator.py   priority = gradient x learnability x availability
   pedagogy/      hint ladder, capture, explain-back gate, prerequisite DAG
-  exchange/      briefing out, structured record in (no API required)
+  exchange/      briefing out, structured record in (no API required;
+                 relay.py sends it for you if you configure one)
   session.py     the drill loop, headless; front ends are adapters over it
   storage/       SQLite, append-only activity log
   cli.py         the terminal adapter
@@ -65,6 +66,7 @@ study report                              # position, routes, backlog
 study drill                               # one item through the loop
 study drill --section math                # one subject; allocator still picks
 study record <attempt_id>                 # paste the returned JSON block
+study record <attempt_id> --auto          # or send it, with a key in .env
 ```
 
 `--product` has no default: the kernel is not allowed to know which products
@@ -149,9 +151,26 @@ forking workers unavailable rather than merely discouraged.
 
 Capture (blind) → grade (deterministic) → tutor briefing out → record in.
 
-There is no API. The briefing goes to a file, tutoring happens in whatever
+No API required. The briefing goes to a file, tutoring happens in whatever
 chat client you like, and one structured JSON block comes back. `study record`
 rejects it on `item_id` mismatch, which is what makes that safe.
+
+**Auto-send is optional.** Put an API key in `.env` (see `.env.example`) and
+the briefing is sent and the reply recorded for you — in the browser it fires
+as soon as an item you missed reaches the exchange panel, and on the terminal
+`study drill` finishes with the diagnosis instead of a filename. Nothing about
+the protocol changes: the reply goes through the same parser and the same
+`item_id` check, and any failure — no key, bad key, rate limit, dead network —
+falls back to the paste box with the briefing already stored. A clean solve is
+asked before it is sent rather than fired at automatically, because that is the
+item the skip button exists for.
+
+```bash
+cp .env.example .env      # then fill in STUDY_RELAY_KEY (or aistudioAPI)
+study drill               # sends automatically and prints the diagnosis
+study drill --no-relay    # write the briefing and stop, as before
+study record 42 --auto    # send a briefing you skipped earlier
+```
 
 The loop lives in `kernel/session.py`, not in the CLI. `DrillSession` owns the
 sequence and the invariants that go with it — the answer key is not in the

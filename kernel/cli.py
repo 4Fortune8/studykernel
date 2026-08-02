@@ -24,6 +24,7 @@ from pathlib import Path
 from kernel import allocator, config, session
 from kernel.analytics import report as report_mod
 from kernel.exchange import record as record_mod
+from kernel.exchange import relay
 from kernel.objectives import base as objective_base
 from kernel.pedagogy import capture as capture_mod
 from kernel.pedagogy import grading, hints
@@ -249,29 +250,36 @@ def cmd_drill(args: argparse.Namespace) -> int:
     briefing = drill.briefing(served.token)
     out = Path(args.briefing_out)
     out.write_text(briefing.text)
-    drill.finish(served.token)
 
+    # The briefing is written either way, before the send is attempted. It is
+    # the artifact that makes the exchange recoverable, and a relay that fails
+    # must leave the learner exactly where the no-API path would have.
+    if relay.configured() and not args.no_relay:
+        print("\nSending the briefing for tutoring...")
+        try:
+            diagnosis = drill.tutor(served.token)
+        except (relay.RelayError, record_mod.RecordError) as exc:
+            print(f"  relay failed: {exc}")
+        else:
+            drill.finish(served.token)
+            print()
+            _print_diagnosis(diagnosis)
+            return 0
+
+    drill.finish(served.token)
     print("\n" + "=" * 68)
     print(f"Briefing written to {out}")
-    print("Paste it into your chat client, then:")
-    print(f"  study record {briefing.attempt_id} --product {args.product}")
+    if relay.configured():
+        print("Paste it into your chat client, or send it with:")
+        print(f"  study record {briefing.attempt_id} --auto --product {args.product}")
+    else:
+        print("Paste it into your chat client, then:")
+        print(f"  study record {briefing.attempt_id} --product {args.product}")
     print("=" * 68)
     return 0
 
 
-def cmd_record(args: argparse.Namespace) -> int:
-    product, conn = _load(args)
-    drill = session.DrillSession(conn, product, args.learner)
-
-    print("Paste the returned JSON block, then Ctrl-D:")
-    pasted = sys.stdin.read()
-
-    try:
-        diagnosis = drill.record(args.attempt_id, pasted)
-    except record_mod.RecordError as exc:
-        print(f"rejected: {exc}")
-        return 1
-
+def _print_diagnosis(diagnosis: record_mod.Diagnosis) -> None:
     print(f"recorded: {diagnosis.error_code}")
     if diagnosis.divergence:
         print(f"where it broke: {diagnosis.divergence}")
@@ -282,6 +290,29 @@ def cmd_record(args: argparse.Namespace) -> int:
         print("item flagged disputed_key")
     if diagnosis.explain_back_ok is False:
         print("explain-back rejected -- the attempt stays unresolved")
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    product, conn = _load(args)
+    drill = session.DrillSession(conn, product, args.learner)
+
+    try:
+        if args.auto:
+            # Same stored briefing the clipboard path would have used, sent
+            # rather than carried. `--auto` is explicit here, unlike the drill
+            # loop: this command exists to be handed a reply, and guessing that
+            # a bare `study record` meant "go and fetch one" would be a
+            # different command wearing the same name.
+            print("Sending the stored briefing for tutoring...")
+            diagnosis = drill.tutor_attempt(args.attempt_id)
+        else:
+            print("Paste the returned JSON block, then Ctrl-D:")
+            diagnosis = drill.record(args.attempt_id, sys.stdin.read())
+    except (record_mod.RecordError, relay.RelayError) as exc:
+        print(f"rejected: {exc}")
+        return 1
+
+    _print_diagnosis(diagnosis)
     return 0
 
 
@@ -413,9 +444,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="restrict to one subject; the allocator still picks the tag within it",
     )
     p_drill.add_argument("--briefing-out", default="briefing.txt")
+    p_drill.add_argument(
+        "--no-relay",
+        action="store_true",
+        help="write the briefing and stop, even when an API key is configured",
+    )
 
     p_record = sub.add_parser("record", help="record a returned diagnosis")
     p_record.add_argument("attempt_id", type=int)
+    p_record.add_argument(
+        "--auto",
+        action="store_true",
+        help="send the stored briefing to the configured API instead of reading a paste",
+    )
 
     sub.add_parser("report", help="position, routes, reliability, backlog")
 
@@ -456,6 +497,10 @@ COMMANDS = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before the parser, because `--product` defaults out of the environment
+    # and `.env` is part of that environment. Real exported variables still
+    # win -- see `config.load_env_file`.
+    config.load_env_file()
     args = build_parser().parse_args(argv)
     try:
         return COMMANDS[args.command](args)

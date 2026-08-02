@@ -28,8 +28,9 @@
     {% if past.exchange_state == "waived" %}Exchange skipped{% else %}Exchange still open{% endif %}
   </h2>
   <p class="note">
-    The briefing was kept. Paste it into a chat client whenever you want the
-    diagnosis — nothing expired and nothing was lost.
+    The briefing was kept. {% if relay_ready() %}Send it whenever you want the
+    diagnosis{% else %}Paste it into a chat client whenever you want the
+    diagnosis{% endif %} — nothing expired and nothing was lost.
     <code>prompt_version {{ briefing["prompt_version"] }}</code>
   </p>
 
@@ -41,10 +42,18 @@
   </div>
   <pre id="briefing-text" class="briefing">{{ briefing["briefing"] }}</pre>
 
-  <h2>Paste the reply</h2>
+  <h2>{% if relay_ready() %}Tutoring{% else %}Paste the reply{% endif %}</h2>
   <div id="exchange-result">
     {% set record_url = "/history/" ~ past.attempt_id ~ "/record" %}
-    {% include "drill/_exchange_form.html" %}
+    {% set tutor_url = "/history/" ~ past.attempt_id ~ "/tutor" %}
+    {# Never `auto_send` here. This exchange is open because the learner walked
+       away from it; opening the page again is not them asking for it. #}
+    {% set auto_send = false %}
+    {% if relay_ready() %}
+      {% include "drill/_exchange_pending.html" %}
+    {% else %}
+      {% include "drill/_exchange_form.html" %}
+    {% endif %}
   </div>
 {% else %}
   <p class="note">No briefing was stored for this attempt.</p>

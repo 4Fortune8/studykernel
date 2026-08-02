@@ -28,8 +28,14 @@
 
   <h2>Briefing</h2>
   <p class="note">
-    Paste this into whatever chat client you like. There is no API and does
-    not need to be one. <code>prompt_version {{ briefing.prompt_version }}</code>
+    {% if relay_ready() %}
+      Sent for you, and kept here in full — the protocol is the same either
+      way, and pasting it into a chat client yourself still works.
+    {% else %}
+      Paste this into whatever chat client you like. There is no API and does
+      not need to be one.
+    {% endif %}
+    <code>prompt_version {{ briefing.prompt_version }}</code>
   </p>
 
   <div class="briefing-tools">
@@ -40,12 +46,21 @@
   </div>
   <pre id="briefing-text" class="briefing">{{ briefing.text }}</pre>
 
-  <h2>Paste the reply</h2>
+  <h2>{% if relay_ready() %}Tutoring{% else %}Paste the reply{% endif %}</h2>
   <div id="exchange-result">
     {% set record_url = "/drill/" ~ token ~ "/record" %}
+    {% set tutor_url = "/drill/" ~ token ~ "/tutor" %}
+    {# Auto-send where the exchange earns its keep, and only there. A clean
+       solve at L0 is the case the waive button exists for -- firing a request
+       at it anyway spends quota on the items the learner was about to skip,
+       and quietly makes "skip the tutoring" mean "skip reading it". #}
+    {% set auto_send = not (view.verdict and view.verdict.correct
+                            and view.verdict.min_hint_level == 0) %}
     {% if view.diagnosis %}
       {% set diagnosis = view.diagnosis %}
       {% include "drill/_exchange_result.html" %}
+    {% elif relay_ready() %}
+      {% include "drill/_exchange_pending.html" %}
     {% else %}
       {% include "drill/_exchange_form.html" %}
     {% endif %}

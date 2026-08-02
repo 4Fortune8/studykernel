@@ -351,6 +351,34 @@ the explanation and self-report L1. Accepted, not engineered against — the
 user is subject and sole beneficiary, and corrupting the log corrupts only
 their own diagnostics.
 
+**Optional API mode** (§16 v2, `kernel/exchange/relay.py`). With an API key in
+`.env` the briefing is sent and the reply recorded without a clipboard. The
+title of this section still holds and is not a legacy label: with no key the
+system is unchanged, and every front end falls back to the paste box on any
+relay failure — the attempt is durable and the briefing is stored before a
+send is ever attempted, so a dead API costs a click, not an item.
+
+Nothing about the *protocol* moves. The `item_id` check stays on the inbound
+side, in `record.parse`, and rejects a mismatched reply whether it was typed
+back from a chat window or arrived over a socket. What the relay adds is a
+response schema, which makes the failures the paste path actually suffers —
+prose around the block, a missing `one_fix`, an invented error code —
+unrepresentable rather than merely rejected.
+
+The briefing is rendered in two halves for this (`instructions()` and
+`item_block()`): the task, the policy and the taxonomy are stable across every
+item in a section and go in the system turn, while the passage, the stem and
+the learner's own words are *data* and go in the user turn, announced as data.
+A stem out of a corpus is arbitrary prose, and a line in one that reads like an
+instruction is part of the item. `render()` concatenates the halves into the
+one string the clipboard has always used, and that string is what is stored, so
+a transcript reads the same from either path.
+
+Who answered is recorded on the exchange as `responder` — `paste`, or
+`api:<model>`. Not folded into `prompt_version`, which answers a different
+question: a change in diagnosis quality over a month of study is
+uninterpretable if you cannot tell which of them changed underneath it.
+
 ---
 
 ## Part IV — Product 1: `tsi-ready`
@@ -546,7 +574,7 @@ None of this is licensed to become a research project.
 - [ ] `maximize` objective; fragility weighting; hard-only + two-pass modes
 - [ ] Local web UI; prompt refinement pass against real transcripts
 - [ ] Packaging, NOTICE generation, setup docs
-- [ ] Optional API mode alongside copy/paste
+- [x] Optional API mode alongside copy/paste (§10; `kernel/exchange/relay.py`)
 
 ### 17. Open questions
 

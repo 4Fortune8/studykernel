@@ -256,6 +256,27 @@ back, rejected on `item_id` mismatch. What improves is everything around it:
 - the `item_id` mismatch message names both ids, so the cause (a stale tab) is
   obvious rather than mysterious
 - `prompt_version` is displayed, so a transcript can be placed later
+- with an API key configured (DESIGN.md §10, optional API mode), the panel
+  sends the briefing itself and swaps in the diagnosis, so the exchange costs
+  no clipboard operations at all
+
+The auto-send rules are the part worth writing down, because each of them is a
+place where the obvious behaviour is wrong:
+
+- **It fires on load only where the exchange earns its keep** — a wrong answer,
+  or a right one that needed a hint. A clean unaided solve gets a *button*.
+  That is the item the skip affordance exists for, and firing at it anyway
+  spends quota on exchanges the learner was about to decline, which quietly
+  turns "skip the tutoring" into "skip reading it".
+- **An open exchange in `History` never fires on load.** It is open because the
+  learner walked away from it; opening the page again is not them asking.
+- **A failure comes back as a retry button, never a re-triggered load.**
+  Whatever just failed will fail the same way on a retry nobody asked for, and
+  a page that re-sends itself against a rate limiter makes the problem worse
+  while looking like it is helping.
+- **The paste box stays on the page**, collapsed behind one click. It is the
+  protocol; the relay is a shortcut over it. A fallback that only appears once
+  something has already gone wrong is a fallback nobody trusts.
 
 ---
 

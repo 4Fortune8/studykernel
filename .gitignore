@@ -20,3 +20,8 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# API keys and local secrets. Never committed.
+.env
+.env.*
+!.env.example

@@ -219,6 +219,14 @@ CREATE TABLE IF NOT EXISTS exchanges (
     prompt_version TEXT NOT NULL,           -- keeps early data interpretable
     briefing       TEXT NOT NULL,
     payload_json   TEXT,                    -- the structured return block
+    -- What produced the reply: 'paste' when a human carried it back from a
+    -- chat client, 'api:<model>' when the optional relay fetched it
+    -- (DESIGN.md §16 v2). Null until a reply lands. Kept because the two are
+    -- not interchangeable evidence -- a change in diagnosis quality across a
+    -- month of study is uninterpretable without knowing which of them
+    -- switched model underneath it. `prompt_version` answers a different
+    -- question and must not be overloaded with this one.
+    responder      TEXT,
     created_at     TEXT NOT NULL
 );
 

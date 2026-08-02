@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import json
 
 import pytest
 
@@ -382,6 +383,141 @@ def test_a_well_formed_diagnosis_records(drill, conn):
 def test_recording_against_a_missing_attempt_is_refused(drill):
     with pytest.raises(session.record_mod.RecordError):
         drill.record(9999, "{}")
+
+
+# ------------------------------------------ the relay: the same loop, sent
+#
+# DESIGN.md §16 v2. Every test here injects the sender, because what is worth
+# checking about auto-send is not the socket -- it is that the sequence the
+# clipboard path goes through is the sequence the relay path goes through.
+
+
+def _stub(payload: dict, model: str = "test-model"):
+    """A sender that returns `payload` and records what it was asked."""
+    calls: list[tuple] = []
+
+    def send(body, system=None, schema=None):
+        calls.append((body, system, schema))
+        return session.relay.RelayReply(
+            text=json.dumps(payload), model=model, responder=f"api:{model}"
+        )
+
+    send.calls = calls  # type: ignore[attr-defined]
+    return send
+
+
+def _good_payload(item_id: str) -> dict:
+    return {
+        "item_id": item_id,
+        "divergence": "You wrote 6 x 7 = 36.",
+        "error_code": "execution_error",
+        "prerequisite_gaps": [],
+        "one_fix": "check the carry",
+        "explanation": "Six sevens is 42, not 36.",
+        "trigger_miss": False,
+        "explain_back_ok": True,
+        "explain_back_feedback": "",
+        "disputed_key": False,
+    }
+
+
+def _brief(drill):
+    served, _ = advance_to_gate(drill)
+    drill.submit_explain_back(served.token, " ".join(["step"] * 20))
+    return served.token, drill.briefing(served.token)
+
+
+def test_a_relayed_reply_records_exactly_as_a_pasted_one_would(drill, conn):
+    token, briefing = _brief(drill)
+    diagnosis = drill.tutor(token, send=_stub(_good_payload(briefing.item_id)))
+
+    assert diagnosis.error_code == "execution_error"
+    assert diagnosis.divergence == "You wrote 6 x 7 = 36."
+    row = conn.execute(
+        "SELECT payload_json, responder FROM exchanges WHERE attempt_id = ?",
+        (briefing.attempt_id,),
+    ).fetchone()
+    assert row["payload_json"] is not None
+    # Who answered, not which prompt asked. The two are different questions and
+    # `prompt_version` already answers the other one.
+    assert row["responder"] == "api:test-model"
+
+
+def test_a_pasted_reply_is_still_marked_as_one(drill, conn):
+    _, briefing = _brief(drill)
+    drill.record(
+        briefing.attempt_id,
+        json.dumps(_good_payload(briefing.item_id)),
+    )
+    row = conn.execute(
+        "SELECT responder FROM exchanges WHERE attempt_id = ?", (briefing.attempt_id,)
+    ).fetchone()
+    assert row["responder"] == db.RESPONDER_PASTE
+
+
+def test_the_relay_sends_the_item_as_data_and_the_task_as_a_system_turn(drill):
+    token, briefing = _brief(drill)
+    send = _stub(_good_payload(briefing.item_id))
+    drill.tutor(token, send=send)
+
+    body, system, schema = send.calls[0]  # type: ignore[attr-defined]
+    assert briefing.item_id in body, "the item goes in the data turn"
+    assert "YOUR TASK" in system, "the task goes in the system turn"
+    assert "YOUR TASK" not in body
+    # Under a schema the format contract is the decoder's job, not the prose's.
+    assert "```json" not in system
+    assert schema["propertyOrdering"], "sent under a response schema or not at all"
+
+
+def test_the_relay_cannot_land_a_diagnosis_on_the_wrong_item(drill, conn):
+    """The check that makes the protocol safe is on the inbound side, and
+    replacing the clipboard with a socket must not have moved it."""
+    token, briefing = _brief(drill)
+    send = _stub(_good_payload("some-other-item"))
+
+    with pytest.raises(session.record_mod.RecordError, match="mismatch"):
+        drill.tutor(token, send=send)
+
+    assert conn.execute("SELECT COUNT(*) FROM diagnoses").fetchone()[0] == 0
+
+
+def test_a_relay_failure_leaves_the_attempt_and_the_briefing_intact(drill, conn):
+    """A failed send is not a failed drill. The gate already passed, the
+    attempt is durable, and the briefing is stored -- so the fallback is the
+    ordinary copy/paste path rather than a lost item."""
+    token, briefing = _brief(drill)
+
+    def explode(*_args, **_kwargs):
+        raise session.relay.RelayError("the tutoring API is unavailable right now")
+
+    with pytest.raises(session.relay.RelayError):
+        drill.tutor(token, send=explode)
+
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+    assert db.load_briefing(conn, briefing.attempt_id) is not None
+    # And the paste path still works afterwards, on the same attempt.
+    diagnosis = drill.record_for(token, json.dumps(_good_payload(briefing.item_id)))
+    assert diagnosis.error_code == "execution_error"
+
+
+def test_an_exchange_picked_back_up_later_sends_the_stored_briefing(drill, conn):
+    """No drill in hand, so no halves -- the stored briefing goes as one turn,
+    which is the same request the learner would have pasted by hand."""
+    token, briefing = _brief(drill)
+    drill.finish(token)
+
+    send = _stub(_good_payload(briefing.item_id))
+    diagnosis = drill.tutor_attempt(briefing.attempt_id, send=send)
+
+    assert diagnosis.error_code == "execution_error"
+    body, system, _ = send.calls[0]  # type: ignore[attr-defined]
+    assert system is None
+    assert body == briefing.text
+
+
+def test_sending_a_briefing_that_was_never_stored_is_refused(drill):
+    with pytest.raises(session.record_mod.RecordError, match="nothing to send"):
+        drill.tutor_attempt(9999, send=_stub({}))
 
 
 # -------------------------------------------------------- store expiry
