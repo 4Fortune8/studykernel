@@ -1,0 +1,19 @@
+{# The exit for an item the learner will not attempt. Rendered only on the
+   phases before an answer exists, and rendered *inside* the panel so it
+   disappears with the phase rather than needing to be remembered about.
+
+   Not a hole in the gate (WEB_UI.md §4.3): the gate stands between an answer
+   and the log, and there is no answer here. After the verdict this control is
+   gone and the stuck declaration is the honest path -- that one records the
+   attempt and escalates the briefing, which is the opposite of leaving.
+
+   Worded so the learner knows what is written down. A skip that felt like
+   cheating would be used once and then replaced by closing the tab, which is
+   the same lost item with none of the record. #}
+<form method="post" action="/drill/{{ token }}/skip" class="too-hard">
+  <button type="submit" class="ghost">Too hard — skip without answering</button>
+  <span class="note inline">
+    logged as declined, not as wrong: no answer, no rating moves. It comes back
+    once the rest of this category has been used.
+  </span>
+</form>

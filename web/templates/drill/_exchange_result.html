@@ -44,6 +44,15 @@
     {% if diagnosis.explain_back_ok is false %}
       <p class="note">Explain-back rejected — the attempt stays unresolved.</p>
     {% endif %}
-    <p><a href="/">What next</a></p>
+    {# The end of the item, and the place the learner is actually sitting when
+       they decide whether to carry on. `token` is absent when an exchange is
+       finished from `/history` -- there is no drill in flight there, so the
+       honest control is the link back rather than a button that would start
+       something from a page about the past. #}
+    {% if token %}
+      {% include "drill/_next_question.html" %}
+    {% else %}
+      <p><a href="/">What next</a></p>
+    {% endif %}
   </div>
 {% endif %}

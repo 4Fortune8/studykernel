@@ -742,6 +742,84 @@ def test_position_is_read_only(drill, conn):
     assert after == before
 
 
+# ------------------------------------------- declining an item, unattempted
+
+
+def test_skipping_records_the_item_without_an_attempt(drill, conn):
+    """An item declined is not an item failed. No answer exists, so there is no
+    evidence about the learner or the item, and neither rating may move."""
+    served = drill.start()
+    before = conn.execute(
+        "SELECT rating, n_attempts FROM items WHERE item_id = ?", (served.item_id,)
+    ).fetchone()
+
+    drill.skip(served.token)
+
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM learner_state").fetchone()[0] == 0
+    after = conn.execute(
+        "SELECT rating, n_attempts FROM items WHERE item_id = ?", (served.item_id,)
+    ).fetchone()
+    assert after["rating"] == before["rating"]
+    assert after["n_attempts"] == before["n_attempts"]
+
+    row = conn.execute("SELECT * FROM skips").fetchone()
+    assert row["item_id"] == served.item_id
+    assert row["tag_slug"] == served.tag_slug
+    assert row["item_rating"] == before["rating"], "the difficulty that was refused"
+
+
+def test_a_skip_records_the_hints_taken_first(drill, conn):
+    """"Too hard on sight" and "too hard after four hints" are different
+    findings -- the first is a band error, the second is a hard item."""
+    served = drill.start()
+    drill.request_hint(served.token, 3)
+    drill.skip(served.token)
+
+    assert conn.execute("SELECT rungs_seen FROM skips").fetchone()[0] == 3
+
+
+def test_a_skip_after_the_capture_is_still_a_skip(drill, conn):
+    """Nothing is in the log until an answer is graded, so a locked capture
+    does not make declining into an attempt."""
+    served = drill.start()
+    drill.submit_capture(served.token, good_capture())
+    drill.skip(served.token)
+
+    assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+
+
+def test_an_answered_item_cannot_be_skipped(drill, conn):
+    """The one that matters. After the verdict this would be an escape from the
+    explain-back gate, which WEB_UI.md §4.3 does not have -- and it would let a
+    learner erase a miss by relabelling it as never attempted."""
+    served, _ = advance_to_gate(drill, answer="16/3")
+
+    with pytest.raises(session.PhaseError):
+        drill.skip(served.token)
+
+    assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 0
+    # And the drill is still live, so the gate is still the way out.
+    assert drill.view(served.token).phase is session.Phase.ANSWERED
+
+
+def test_a_skipped_item_is_not_served_again_immediately(drill, conn):
+    """Without this the button does nothing: `n_attempts` is unchanged by a
+    skip, so the item just declined is still the least-attempted one in band."""
+    first = drill.start()
+    drill.skip(first.token)
+
+    served = [drill.start() for _ in range(5)]
+    assert first.item_id not in {s.item_id for s in served}, "not while others remain"
+
+    # But not deleted from the corpus either: when the band holds nothing else,
+    # it comes back rather than starving the tag.
+    for s in served:
+        drill.skip(s.token)
+    assert drill.start().item_id is not None
+
+
 # ---------------------------------------------------- starvation and stop
 
 

@@ -505,6 +505,94 @@ async def drill_tutor(request: Request, token: str) -> HTMLResponse:
         conn.close()
 
 
+def _next_item(request: Request, drill: session.DrillSession) -> RedirectResponse:
+    """Serve whatever comes next, or hand back to `Now` when nothing should be.
+
+    One helper for both ways of leaving an item, so neither can drift into
+    being a second source of items. `start()` is the allocator call the `Now`
+    page's start button makes, which is what keeps a satisfied objective a
+    full-page stop (WEB_UI.md §6) rather than something these routes would have
+    to remember to check.
+
+    The subject focus comes from the cookie rather than the drill, so "I am
+    doing maths this evening" survives the item the same way it survives `Now`.
+    """
+    served = drill.start(section=deps.active_subject(request.cookies, drill.product))
+    if not isinstance(served, session.Served):
+        # Satisfied or starved -- `Now` is the page that says so properly.
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/drill/{served.token}", status_code=303)
+
+
+@app.post("/drill/{token}/skip")
+async def drill_skip(request: Request, token: str) -> RedirectResponse:
+    """"Too hard" -- leave the item unattempted and serve the next one.
+
+    The same move as `/next` without the item having been answered, and it is
+    recorded as what it is: an item declined, in `skips`, touching no rating on
+    either side. The alternative to a button is not a learner who works the
+    item; it is a learner who closes the tab, and that leaves the same hole in
+    the data with none of the signal about *which* item was too hard.
+
+    The kernel decides whether the phase allows it, not this route. After a
+    verdict there is no skip and there is not meant to be one -- WEB_UI.md §4.3
+    -- and a learner who had no method has the stuck declaration, which records
+    the attempt instead of erasing it.
+    """
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        try:
+            drill.skip(token)
+        except session.PhaseError:
+            # A stale tab, or a second submit. Redraw where the drill actually
+            # is rather than reporting an error about a step nobody took twice.
+            return RedirectResponse(f"/drill/{token}", status_code=303)
+        return _next_item(request, drill)
+    finally:
+        conn.close()
+
+
+@app.post("/drill/{token}/next")
+async def drill_next(request: Request, token: str) -> RedirectResponse:
+    """Finished this item -- serve the next one, without a detour through `Now`.
+
+    A finished item used to offer one exit, a link back to `Now`, and getting
+    to the next question from there is a page load and a second click on a
+    recommendation the learner already accepted. This is that pair collapsed.
+
+    It is deliberately *not* an infinite "more practice" button, which
+    WEB_UI.md §6 forbids outright: it serves the next item by calling
+    `start()`, the same allocator call the `Now` page's start button makes, so
+    a satisfied objective comes back `Satisfied` and lands on the full-page
+    stop instead of another item. The button cannot outlive the reason to
+    study, because it is not a separate way to get items.
+    """
+    conn = deps.connect()
+    try:
+        drill = _session(request, conn)
+        if drill is None:
+            return RedirectResponse("/profiles", status_code=303)
+        view = drill.view(token)
+        if view.phase not in (session.Phase.BRIEFED, session.Phase.EXPLAINED):
+            # A stale tab must not be able to throw away a capture in progress.
+            # Only a drill that is through the gate is finished with, and only
+            # a finished item renders this control.
+            return RedirectResponse(f"/drill/{token}", status_code=303)
+        if view.diagnosis is None and view.attempt_id is not None:
+            # Walking away from an open exchange is a skip, and it is recorded
+            # as one -- same as `/waive`, and recoverable from `/history` for
+            # the same reason. Leaving it unmarked would make every item
+            # finished this way look like an exchange still owed.
+            db.waive_exchange(conn, view.attempt_id)
+        drill.finish(token)
+        return _next_item(request, drill)
+    finally:
+        conn.close()
+
+
 @app.post("/drill/{token}/waive")
 async def drill_waive(request: Request, token: str) -> RedirectResponse:
     """"I don't need tutoring on this one." DESIGN.md §10.
@@ -560,6 +648,10 @@ async def history(
                     tag_slug=tag or None, outcome=outcome or None, state=state or None,
                 ),
                 "tallies": db.tally_by_category(conn, learner, product_id),
+                # Not attempts, and deliberately not folded into the table
+                # above: a tag can collect skips without a single answer in it,
+                # and that is the case most worth seeing.
+                "skips": db.tally_skips(conn, learner, product_id),
                 "tag": tag,
                 "outcome": outcome,
                 "state": state,

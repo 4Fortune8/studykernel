@@ -439,16 +439,87 @@ def load_edges(conn: sqlite3.Connection, product_id: str) -> dict[str, list[tupl
 
 
 def pick_item(
-    conn: sqlite3.Connection, product_id: str, tag_slug: str, lo: float, hi: float
+    conn: sqlite3.Connection,
+    product_id: str,
+    tag_slug: str,
+    lo: float,
+    hi: float,
+    learner_id: str | None = None,
 ) -> sqlite3.Row | None:
-    """Least-attempted item in the band, so calibration spreads instead of pooling."""
+    """Least-attempted item in the band, so calibration spreads instead of pooling.
+
+    Items this learner has declined as too hard sort last. `n_attempts` is a
+    global count, so without this the item just declined is still the
+    least-attempted one in the band and comes straight back -- which makes
+    declining it useless and the record of it a lie about what was served.
+
+    Sorted last rather than filtered out: a skip is a statement about one
+    evening, not a deletion from the corpus. When the band holds nothing else
+    the item returns, which is the correct behaviour for a learner who has
+    since moved up. Repeated skips sink it further each time.
+
+    `learner_id` is optional so a caller with no learner in hand -- a corpus
+    tool, a test -- keeps the old meaning exactly.
+    """
     return conn.execute(
-        """SELECT i.* FROM items i
+        """SELECT i.*, COUNT(s.skip_id) AS n_skips FROM items i
            JOIN item_tags t ON t.item_id = i.item_id
+           LEFT JOIN skips s
+                  ON s.item_id = i.item_id AND s.learner_id = ? AND s.product_id = ?
            WHERE i.product_id = ? AND t.tag_slug = ? AND i.rating BETWEEN ? AND ?
-           ORDER BY i.n_attempts ASC, RANDOM() LIMIT 1""",
-        (product_id, tag_slug, lo, hi),
+           GROUP BY i.item_id
+           ORDER BY n_skips ASC, i.n_attempts ASC, RANDOM() LIMIT 1""",
+        (learner_id, product_id, product_id, tag_slug, lo, hi),
     ).fetchone()
+
+
+def record_skip(
+    conn: sqlite3.Connection,
+    learner_id: str,
+    product_id: str,
+    item: sqlite3.Row,
+    tag_slug: str,
+    served_at: str,
+    rungs_seen: int = 0,
+) -> int:
+    """Log an item declined without an attempt. Returns skip_id.
+
+    Deliberately not `record_attempt` with a flag: nothing here touches a
+    rating, on either side. No answer was given, so there is no evidence about
+    the learner and none about the item, and inventing some would corrupt the
+    only thing the ratings are for.
+    """
+    cur = conn.execute(
+        """INSERT INTO skips (learner_id, product_id, item_id, tag_slug,
+                              served_at, skipped_at, rungs_seen, item_rating)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (
+            learner_id,
+            product_id,
+            item["item_id"],
+            tag_slug,
+            served_at,
+            now(),
+            rungs_seen,
+            item["rating"],
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def tally_skips(
+    conn: sqlite3.Connection, learner_id: str, product_id: str
+) -> dict[str, int]:
+    """Declined-as-too-hard counts per tag, for a front end to show beside the
+    outcomes. A skip nobody ever sees is a skip that teaches nothing."""
+    rows = conn.execute(
+        """SELECT COALESCE(tag_slug, '?') AS tag_slug, COUNT(*) AS n
+             FROM skips WHERE learner_id = ? AND product_id = ?
+         GROUP BY tag_slug""",
+        (learner_id, product_id),
+    ).fetchall()
+    return {row["tag_slug"]: row["n"] for row in rows}
 
 
 # ------------------------------------------------------------- the log itself

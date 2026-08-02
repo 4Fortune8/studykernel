@@ -420,6 +420,31 @@ span.right { color: var(--accent); }
    the exchange is not wanted. */
 .waive { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; margin: 0.8rem 0 1.4rem; }
 
+/* Same row shape as the skip control, one step louder: on a finished item the
+   next question is the likely move, and going back to `Now` is the considered
+   one. Not louder than that -- see WEB_UI.md §6. */
+.next-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 1.2rem 0 0.4rem;
+}
+.diagnosis .next-item { margin-bottom: 0; }
+
+/* Below the submit and behind a rule: leaving an item is a different kind of
+   decision from working it, and it should not read as one more button on the
+   form. Quiet on purpose -- available, not suggested. */
+.too-hard {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 1.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
 .error-detail {
   white-space: pre-wrap;
   border-left: 2px solid #b4472f;

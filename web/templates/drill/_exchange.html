@@ -12,7 +12,12 @@
   {# The exchange earns its keep on items you got wrong or scraped through.
      On a clean solve it is mostly ceremony, and forcing it is how a loop
      stops getting used -- DESIGN.md §10 says no API is required for the
-     system to work, which makes declining a legitimate end state. #}
+     system to work, which makes declining a legitimate end state.
+
+     Two ways out, because "done with the tutoring" and "done studying" are
+     different decisions: the first goes on to the next item, the second goes
+     back to `Now`, where the position readout and the stop live. #}
+  {% include "drill/_next_question.html" %}
   <form method="post" action="/drill/{{ token }}/waive" class="waive">
     <button type="submit" class="ghost">
       {% if view.verdict and view.verdict.correct %}

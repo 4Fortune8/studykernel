@@ -1,0 +1,13 @@
+{# The exit from a finished item. Rendered wherever an item is done: beside the
+   skip control, and under a recorded diagnosis.
+
+   `Now` stays one click away and stays the honest answer to "should I keep
+   going" -- this is the shortcut for when that answer is obviously yes, not a
+   replacement for asking. The route is `start()`, so a satisfied objective
+   still ends up on the stop page (WEB_UI.md §6). #}
+<form method="post" action="/drill/{{ token }}/next" class="next-item">
+  <button type="submit" class="start">Next question</button>
+  <span class="note inline">
+    the allocator picks it, the same as <a href="/">Now</a> would
+  </span>
+</form>

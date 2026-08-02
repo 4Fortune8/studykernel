@@ -503,7 +503,14 @@ class DrillSession:
 
         alloc = choice
         lo, hi = alloc.target_band
-        item = db.pick_item(self.conn, self.product["product_id"], alloc.tag_slug, lo, hi)
+        item = db.pick_item(
+            self.conn,
+            self.product["product_id"],
+            alloc.tag_slug,
+            lo,
+            hi,
+            learner_id=self.learner,
+        )
         if item is None:
             return Starved(
                 f"no item for {alloc.tag_slug} in band {lo:.0f}-{hi:.0f}",
@@ -823,6 +830,40 @@ class DrillSession:
             row["briefing"], None, briefing_mod.response_schema(self.product_error_codes())
         )
         return self.record(attempt_id, reply.text, responder=reply.responder)
+
+    def skip(self, token: str) -> int:
+        """"Too hard -- I am not attempting this one." Returns skip_id.
+
+        Allowed **before an answer is submitted, and only there.** After the
+        verdict this would be an escape from the explain-back gate, which
+        WEB_UI.md §4.3 does not have and is not getting: the honest path for a
+        learner who had no method is the stuck declaration, which records the
+        attempt and escalates the briefing. The distinction the phase check
+        enforces is between *not attempting* and *having attempted badly*, and
+        a log that blurred those two would be worth less than no log.
+
+        Nothing about a skip touches a rating. It is not a wrong answer -- no
+        answer exists -- and the item was refused, not failed. What it does
+        produce is a signal about the allocator: items are served in a band it
+        predicts the learner can mostly do (DESIGN.md §6.1), so a tag that
+        collects skips is one where the band or the prerequisite floor is
+        wrong. That is the same argument the acquisition backlog makes about
+        the corpus, and it is why this is recorded rather than quietly
+        forgotten the way a closed tab is.
+        """
+        drill = self.store.get(token)
+        self._require(drill, Phase.PRESENTED, Phase.CAPTURED)
+        skip_id = db.record_skip(
+            self.conn,
+            self.learner,
+            self.product["product_id"],
+            drill.item,
+            drill.tag_slug,
+            drill.started_at,
+            rungs_seen=drill.highest_rung_served,
+        )
+        self.store.drop(token)
+        return skip_id
 
     def finish(self, token: str) -> None:
         """Release in-flight state. The attempt is already durable.

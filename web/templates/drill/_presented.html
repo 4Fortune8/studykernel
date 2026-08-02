@@ -120,4 +120,9 @@
 
     <button type="submit">Lock this in and grade</button>
   </form>
+
+  {# Outside the form above, not inside it: nested forms are invalid HTML and
+     the browser resolves them by dropping one, which would silently make this
+     button submit the capture instead. #}
+  {% include "drill/_too_hard.html" %}
 </section>

@@ -213,6 +213,41 @@ CREATE INDEX IF NOT EXISTS idx_attempts_learner
     ON attempts (learner_id, product_id, submitted_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_item ON attempts (item_id);
 
+-- An item served, read, and declined without an answer: "too hard, I am not
+-- attempting this one".
+--
+-- Its own table rather than an attempt, because `attempts.correct` is NOT NULL
+-- and there is no honest value for it here. Recording a non-attempt as wrong
+-- would move both ratings on evidence that does not exist, which is the one
+-- thing the log is for (DESIGN.md §6.1) -- and recording nothing would make
+-- the button a way to shop for easy items with no trace.
+--
+-- The signal is about the *allocator*, not the learner: items are served in a
+-- band the model predicts they can mostly do, so a run of these says the band
+-- is wrong, or the prerequisite below this tag is missing. That is exactly the
+-- judgement `learnability` is supposed to make.
+CREATE TABLE IF NOT EXISTS skips (
+    skip_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    learner_id TEXT NOT NULL REFERENCES learners(learner_id) ON DELETE CASCADE,
+    product_id TEXT NOT NULL,
+    item_id    TEXT NOT NULL REFERENCES items(item_id),
+    -- Which tag it was served for, same as `attempts.tag_slug`.
+    tag_slug   TEXT,
+    served_at  TEXT NOT NULL,
+    skipped_at TEXT NOT NULL,
+    -- Rungs taken before giving up. Nothing separates "too hard on sight" from
+    -- "too hard after four hints" otherwise, and they are different findings:
+    -- the first is a band error, the second is a genuinely hard item.
+    rungs_seen INTEGER NOT NULL DEFAULT 0,
+    -- The item's rating *when it was declined*. Ratings move, so this cannot be
+    -- read back off `items` later, and the difficulty that was refused is the
+    -- whole content of the signal.
+    item_rating REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_skips_learner ON skips (learner_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_skips_item ON skips (item_id);
+
 CREATE TABLE IF NOT EXISTS exchanges (
     exchange_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     attempt_id     INTEGER NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,

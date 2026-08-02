@@ -787,6 +787,150 @@ def test_recording_later_clears_the_waiver(client, tmp_path):
     conn.close()
 
 
+# --------------------------------------------- declining an item, unattempted
+
+
+def test_an_unanswered_item_can_be_declined_as_too_hard(client):
+    token = start_drill(client)
+    page = client.get(f"/drill/{token}").text
+    assert f"/drill/{token}/skip" in page
+    assert "Too hard" in page
+
+    response = client.post(f"/drill/{token}/skip", follow_redirects=False)
+    assert response.status_code == 303
+    following = response.headers["location"].rsplit("/", 1)[1]
+    assert following != token, "and the next item is served, not the home page"
+
+
+def test_declining_writes_a_skip_and_no_attempt(client, tmp_path):
+    token = start_drill(client)
+    client.post(f"/drill/{token}/skip", follow_redirects=False)
+
+    conn = db.connect(tmp_path / "web.db")
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 1
+    conn.close()
+
+
+def test_the_skip_control_is_gone_once_the_answer_is_in(client):
+    """It lives inside the panel, so the phase swap takes it away. A skip after
+    the verdict would be an escape from the gate (WEB_UI.md §4.3)."""
+    token = start_drill(client)
+    panel = work_item(client, token, answer="not-it").text
+    assert "/skip" not in panel
+
+    # And the route agrees, for a stale tab that still has the button.
+    response = client.post(f"/drill/{token}/skip", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/drill/{token}"
+    assert "Explain it back" in client.get(f"/drill/{token}").text
+
+
+def test_declining_stops_at_a_satisfied_objective(client, monkeypatch):
+    """Same guarantee as the next button: one path to an item, so there is no
+    second one to keep in step with WEB_UI.md §6."""
+    from kernel import session
+
+    token = start_drill(client)
+    monkeypatch.setattr(
+        session.DrillSession, "recommend", lambda self, *a, **k: session.Satisfied()
+    )
+    response = client.post(f"/drill/{token}/skip", follow_redirects=False)
+    assert response.headers["location"] == "/"
+
+
+def test_declined_items_are_surfaced_as_a_band_problem_not_a_failure(client):
+    token = start_drill(client)
+    client.post(f"/drill/{token}/skip", follow_redirects=False)
+
+    page = client.get("/history").text
+    assert "Declined as too hard" in page
+    assert "fractions" in page
+    # The count is not a wrong answer and the page has to say so, or the one
+    # honest use of the button reads as a black mark.
+    assert "not counted as wrong" in page
+
+
+# ------------------------------------------------- carrying on to the next one
+
+
+def test_a_finished_item_offers_the_next_question(client):
+    """A finished item used to offer one exit, a link back to `Now`. Getting to
+    the next question from there is a page load and a second click on a
+    recommendation the learner already accepted."""
+    token = finish_a_drill(client)
+    panel = client.get(f"/drill/{token}").text
+    assert f"/drill/{token}/next" in panel
+    assert "Next question" in panel
+    # And the reflective route stays on the page rather than being replaced.
+    assert 'href="/"' in panel
+
+
+def test_next_serves_another_item(client):
+    token = finish_a_drill(client)
+    response = client.post(f"/drill/{token}/next", follow_redirects=False)
+    assert response.status_code == 303
+
+    following = response.headers["location"].rsplit("/", 1)[1]
+    assert following != token
+    assert "Pick the right one." in client.get(f"/drill/{following}").text
+
+
+def test_next_records_an_unrun_exchange_as_skipped(client, tmp_path):
+    """Same bookkeeping as the waive button: walking away from an exchange is a
+    skip, not an exchange still owed, and nothing is thrown away."""
+    token = finish_a_drill(client)
+    client.post(f"/drill/{token}/next", follow_redirects=False)
+
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute(
+        "SELECT attempt_id, exchange_waived_at FROM attempts"
+    ).fetchone()
+    assert row["exchange_waived_at"] is not None
+    assert db.load_briefing(conn, row["attempt_id"]) is not None
+    conn.close()
+
+
+def test_next_after_a_diagnosis_is_not_a_skip(client, tmp_path, relayed):
+    """An exchange that ran is done, and moving on must not relabel it."""
+    token = finish_a_drill(client, answer="not-it")
+    result = client.post(f"/drill/{token}/tutor").text
+    assert f"/drill/{token}/next" in result, "the button is under the diagnosis too"
+
+    client.post(f"/drill/{token}/next", follow_redirects=False)
+    conn = db.connect(tmp_path / "web.db")
+    row = conn.execute("SELECT exchange_waived_at FROM attempts").fetchone()
+    assert row["exchange_waived_at"] is None
+    conn.close()
+
+
+def test_next_stops_at_a_satisfied_objective(client, monkeypatch):
+    """WEB_UI.md §6 forbids serving "more practice" past satisfied. This route
+    is `start()` and nothing else, so the stop page is reached the same way it
+    is from `Now` -- there is no second path to an item to keep in step."""
+    from kernel import session
+
+    token = finish_a_drill(client)
+    monkeypatch.setattr(
+        session.DrillSession, "recommend", lambda self, *a, **k: session.Satisfied()
+    )
+    response = client.post(f"/drill/{token}/next", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+
+
+def test_next_mid_drill_does_not_discard_the_item(client):
+    """A stale tab posting this must not cost a blind capture. Only a drill
+    through the gate is finished with, and only a finished item renders it."""
+    token = start_drill(client)
+    work_item(client, token)  # answered, gate not yet passed
+
+    response = client.post(f"/drill/{token}/next", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/drill/{token}"
+    assert client.get(f"/drill/{token}").status_code == 200
+
+
 def test_history_groups_by_category_and_outcome(client):
     finish_a_drill(client)                      # correct
     finish_a_drill(client, answer="not-it")     # wrong

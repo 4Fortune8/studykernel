@@ -522,6 +522,55 @@ unmeasured manual variable will silently zero A's gradient the same way. The
 generalizable fix belongs in `kernel/objectives/threshold.py`; splitting the
 route is the local workaround, not the cure.
 
+### Leaving an item: the next button, and "too hard" (2026-08-02)
+
+Two exits the drill did not have. Both end in the same place — the next item —
+and both go through `DrillSession.start()`, the call the `Now` page's start
+button makes. That is deliberate and it is the whole safety argument: there is
+**one** path to an item, so a satisfied objective still lands on the full-page
+stop (WEB_UI.md §6) without either route remembering to check.
+
+- **`POST /drill/{token}/next`** — a finished item used to offer one exit, a
+  link back to `Now`. Renders beside the skip-the-tutoring control and under a
+  recorded diagnosis. Leaving an exchange unrun marks it waived, exactly as
+  the waive button does, so the item does not linger as an exchange still
+  owed. Refused before the gate, so a stale tab cannot discard a live capture.
+- **`POST /drill/{token}/skip`** — "too hard, I am not attempting this."
+  Allowed at `presented` and `captured` and **nowhere else**. After the verdict
+  it would be an escape from the explain-back gate, and worse, a way to erase a
+  miss by relabelling it as never attempted; the phase check is enforced in
+  `session.skip()`, not in the route.
+
+The skip is its own table, not an attempt with a flag:
+
+- **`skips`** (new in `schema.sql`, additive via `CREATE TABLE IF NOT EXISTS`,
+  so a live database picks it up on the next boot). `attempts.correct` is NOT
+  NULL and there is no honest value for it here — nothing was answered, so
+  there is no evidence about the learner *or* the item and **no rating moves on
+  either side**. Recording nothing instead would have made the button a way to
+  shop for easy items with no trace.
+- Stores `rungs_seen` and `item_rating` at the moment of the skip. "Too hard on
+  sight" and "too hard after four hints" are different findings, and ratings
+  drift, so the difficulty that was actually refused cannot be read back later.
+
+**`pick_item` had to change or the button would do nothing.** `n_attempts` is a
+global count that a skip does not touch, so the item just declined was still
+the least-attempted one in band and came straight back. It now sorts items this
+learner has skipped *last* — sorted, not filtered: a skip is a statement about
+one evening, not a deletion from the corpus, and when the band holds nothing
+else the item returns. `learner_id` is an optional argument, so a caller with
+no learner in hand keeps the old meaning.
+
+Surfaced on `/history` above the outcomes and outside the tally table, because
+a tag can collect skips without a single answer in it and that is the case
+worth seeing. The wording says what the count is not — it reads as a statement
+about the *allocator*, since items are served in a band it predicts you can
+mostly do. A tag that keeps appearing there is being served above the
+prerequisite floor, not failed.
+
+Not wired into `study drill`; the CLI keeps its own flow. The kernel method is
+front-end agnostic whenever it is wanted there.
+
 ---
 
 ## 7. The standing risk

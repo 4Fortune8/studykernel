@@ -29,4 +29,8 @@
     </fieldset>
     <button type="submit">Submit and grade</button>
   </form>
+
+  {# Still available here: the capture is locked but nothing is in the log
+     until an answer is graded, so declining is still declining. #}
+  {% include "drill/_too_hard.html" %}
 </section>

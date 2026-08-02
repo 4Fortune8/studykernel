@@ -4,6 +4,22 @@
 {% block content %}
 <h1>Questions answered</h1>
 
+{% if skips %}
+  {# Above the outcomes, not inside them. These are not attempts and must never
+     be counted as ones -- nothing was answered and no rating moved. What they
+     measure is the allocator: items are served in a band it predicts you can
+     mostly do, so a tag that collects these is one where the band or the
+     prerequisite floor below it is wrong. #}
+  <p class="note declined">
+    <strong>Declined as too hard:</strong>
+    {% for tag_slug, n in skips|dictsort(by="value", reverse=true) %}
+      <a href="/history?tag={{ tag_slug }}"><code>{{ tag_slug }}</code></a> {{ n }}{% if not loop.last %} · {% endif %}
+    {% endfor %}
+    — not attempts, and not counted as wrong. A category that keeps appearing
+    here is being served above your level, not failed.
+  </p>
+{% endif %}
+
 {% if not attempts and not tag and not outcome and not state %}
   <p class="note">Nothing answered yet. <a href="/">Start a drill</a>.</p>
 {% else %}
